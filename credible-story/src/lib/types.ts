@@ -1,0 +1,145 @@
+export type Category = "Ikhwan" | "Akhwat";
+export type MemberStatus = "active" | "warning_sp1" | "confirming_retention" | "terminated";
+export type RetentionResponse = "menunggu" | "lanjut" | "siap_dikeluarkan" | null;
+
+export interface Member {
+  id: string;
+  name: string;
+  username: string;
+  role: "member" | "admin";
+  category: Category | null;
+  skills: string[];
+  folder_url: string | null;
+  status: MemberStatus;
+  retention_response: RetentionResponse;
+  is_active: boolean;
+  must_change_password: boolean;
+  terminated_at: string | null;
+  created_at: string;
+}
+
+export interface RundownPeriod {
+  id: string;
+  period_month: string;
+  label: string | null;
+  emoji: string;
+  w1_start: string; w1_end: string;
+  w2_start: string; w2_end: string;
+  w3_start: string; w3_end: string;
+  w4_start: string; w4_end: string;
+  sks_start: string | null;
+  recap_date: string | null;
+  monthly_evaluation_notes: string | null;
+  evaluation_published_at: string | null;
+  is_locked: boolean;
+  is_active: boolean;
+}
+
+export interface Concept {
+  id: string;
+  member_id: string;
+  period_month: string;
+  story_number: 1 | 2 | 3;
+  title: string;
+  summary: string;
+  visual_points: string | null;
+  status: "pending" | "revision" | "acc";
+  reviewer_feedback: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Story {
+  id: string;
+  member_id: string;
+  concept_id: string | null;
+  member_name: string | null;
+  category: Category | null;
+  period_month: string;
+  story_target: 1 | 2 | 3;
+  title: string | null;
+  submission_mode: "file" | "link";
+  file_url: string;
+  design_app: string | null;
+  qc_status: "pending_qc" | "revision" | "acc";
+  qc_notes: string | null;
+  wa_channel_link: string | null;
+  is_published_to_showcase: boolean;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ShowcaseItem {
+  id: string;
+  member_name: string;
+  category: Category | null;
+  period_month: string;
+  story_target: number;
+  title: string | null;
+  submission_mode: "file" | "link";
+  file_url: string;
+  design_app: string | null;
+  wa_channel_link: string | null;
+  published_at: string | null;
+}
+
+export interface PeriodFlag {
+  member_id: string;
+  period_month: string;
+  has_kabar: boolean;
+  excuse_note: string | null;
+  design_bareng: boolean;
+  last_reminded_at: string | null;
+  reminder_count: number;
+}
+
+export interface MoodItem { title: string; note: string; palette: string[]; pinterest_url: string }
+
+export interface LearningMaterial {
+  id: string;
+  batch_date: string;
+  title: string;
+  design_app: string;
+  difficulty_level: "Easy" | "Intermediate" | "Advanced";
+  summary: string;
+  tutorial_markdown: string;
+  pinterest_moodboard: MoodItem[];
+  challenge_task: string | null;
+  sources: { title: string; url: string }[];
+  generated_by: string;
+  created_at: string;
+}
+
+export interface GenerationRun {
+  id: string;
+  trigger: string;
+  status: "running" | "success" | "skipped" | "error";
+  message: string | null;
+  materials_created: number;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface Application {
+  id: string;
+  full_name: string;
+  category: Category;
+  phone_number: string;
+  social_media: string | null;
+  design_apps: string[];
+  skill_level: string | null;
+  portfolio_urls: string[];
+  sample_paths: string[];
+  motivation: string | null;
+  status: "pending" | "approved" | "rejected";
+  admin_notes: string | null;
+  approved_member_id: string | null;
+  created_at: string;
+}
+
+export interface ArchiveTopic { id: string; title: string; summary: string | null; period_month: string | null; source: string; created_at: string }
+
+export interface Credentials { id: string; username: string; password: string; name: string; phone_number?: string | null }
+
+export const DESIGN_APPS = ["Canva", "Figma", "Photoshop", "Illustrator", "After Effects", "CapCut", "PixelLab", "Alight Motion", "Lainnya"];

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#991B1B"/><stop offset=".6" stop-color="#DC2626"/><stop offset="1" stop-color="#EF4444"/></linearGradient></defs>
+<rect width="1080" height="1920" fill="#F8FAFC"/>
+<g opacity=".55"><line x1="0" y1="0" x2="0" y2="1920" stroke="#E2E8F0" stroke-width="2"/><line x1="120" y1="0" x2="120" y2="1920" stroke="#E2E8F0" stroke-width="2"/><line x1="240" y1="0" x2="240" y2="1920" stroke="#E2E8F0" stroke-width="2"/><line x1="360" y1="0" x2="360" y2="1920" stroke="#E2E8F0" stroke-width="2"/><line x1="480" y1="0" x2="480" y2="1920" stroke="#E2E8F0" stroke-width="2"/><line x1="600" y1="0" x2="600" y2="1920" stroke="#E2E8F0" stroke-width="2"/><line x1="720" y1="0" x2="720" y2="1920" stroke="#E2E8F0" stroke-width="2"/><line x1="840" y1="0" x2="840" y2="1920" stroke="#E2E8F0" stroke-width="2"/><line x1="960" y1="0" x2="960" y2="1920" stroke="#E2E8F0" stroke-width="2"/><line x1="1080" y1="0" x2="1080" y2="1920" stroke="#E2E8F0" stroke-width="2"/></g>
+<rect x="760" y="180" width="220" height="220" rx="40" fill="#DC2626" opacity=".9" transform="rotate(12 870 290)"/>
+<text x="96" y="300" font-size="34" font-weight="600" fill="#64748B" font-family="Inter, Arial, sans-serif" letter-spacing="8">CREDIBLE STORY · #07</text>
+<rect x="96" y="393" width="120" height="14" rx="7" fill="#DC2626"/>
+<text x="96" y="569" font-size="116" font-weight="800" fill="#0F172A" font-family="Plus Jakarta Sans, Inter, Arial, sans-serif" letter-spacing="-3">JEDA</text><text x="96" y="694" font-size="116" font-weight="800" fill="#0F172A" font-family="Plus Jakarta Sans, Inter, Arial, sans-serif" letter-spacing="-3">SEJENAK,</text><text x="96" y="819" font-size="116" font-weight="800" fill="#0F172A" font-family="Plus Jakarta Sans, Inter, Arial, sans-serif" letter-spacing="-3">BUKAN</text><text x="96" y="944" font-size="116" font-weight="800" fill="#0F172A" font-family="Plus Jakarta Sans, Inter, Arial, sans-serif" letter-spacing="-3">BERHENTI</text>
+<text x="96" y="1110" font-size="40" fill="#64748B" font-family="Inter, Arial, sans-serif">Pengingat kecil untuk hari ini.</text>
+<line x1="96" y1="1660" x2="984" y2="1660" stroke="#64748B" stroke-width="2" opacity=".5"/>
+<text x="96" y="1740" font-size="36" font-weight="600" fill="#0F172A" font-family="Inter, Arial, sans-serif">Ismi Fayza</text>
+<text x="984" y="1740" font-size="32" fill="#64748B" text-anchor="end" font-family="Inter, Arial, sans-serif">Simpan &amp; bagikan ✦</text>
+</svg>
