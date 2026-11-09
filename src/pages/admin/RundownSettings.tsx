@@ -118,7 +118,7 @@ export default function RundownSettings({ periods, selected, onSelect }: { perio
               </Field>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button className="btn-soft btn-sm" onClick={() => setDates(weeklyPreset(p.period_month, dates.story_quota))}>Preset mingguan (1 story/minggu, tenggat mundur dari akhir bulan)</button>
+              <button className="btn-soft btn-sm" onClick={() => setDates(weeklyPreset(p.period_month, dates.story_quota))}>Preset standar (Taqdim Hari 1–3, tenggat 9 / 16 / 23 / akhir bulan)</button>
               <button className="btn-soft btn-sm" onClick={() => setDates(evenPreset(p.period_month, dates.story_quota, 10))}>Preset ala Rundown Oktober (taqdim s/d tgl 10)</button>
             </div>
             <div className="grid grid-cols-2 gap-3">

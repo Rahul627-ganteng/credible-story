@@ -61,11 +61,17 @@ export function legacyWindows(pm: string, taqdimEnd: string, deadlines: string[]
   };
 }
 
-/** Preset mingguan: tenggat story mundur 7 hari dari akhir bulan; taqdim di sisa awal bulan (Nov: Taqdim 1–3, tenggat 9/16/23/30) */
+/**
+ * Preset mingguan (standar tim): Taqdim Hari 1–3, tenggat Story di Hari 9, 16, 23, … dan story terakhir di akhir bulan.
+ * Bila kuota terlalu banyak untuk pola itu, tenggat dihitung mundur 7 hari dari akhir bulan.
+ */
 export function weeklyPreset(pm: string, quota = 4): PeriodDates {
   const last = lastDayOf(pm);
-  const deadlines = Array.from({ length: quota }, (_, i) => dayOf(pm, last - 7 * (quota - 1 - i)));
-  const taqdimEnd = dayOf(pm, Math.max(1, Number(deadlines[0].slice(8)) - 6));
+  const fits = quota >= 2 && 9 + 7 * (quota - 2) < last;
+  const deadlines = fits
+    ? [...Array.from({ length: quota - 1 }, (_, i) => dayOf(pm, 9 + 7 * i)), dayOf(pm, last)]
+    : Array.from({ length: quota }, (_, i) => dayOf(pm, last - 7 * (quota - 1 - i)));
+  const taqdimEnd = fits ? dayOf(pm, 3) : dayOf(pm, Math.max(1, Number(deadlines[0].slice(8)) - 6));
   return {
     w1_start: dayOf(pm, 1), w1_end: taqdimEnd, ...legacyWindows(pm, taqdimEnd, deadlines),
     sks_start: dayOf(pm, last - 3), recap_date: dayOf(pm, last), story_quota: quota, story_deadlines: deadlines,
@@ -127,7 +133,8 @@ export function phaseOf(p: RundownPeriod | null | undefined, today = todayJakart
   if (today < p.w1_start) return { ...base, key: "pre", id: "pre", step: 0, title: "Rundown belum dimulai", subtitle: `Dimulai ${fmtDate(p.w1_start)}`, endsOn: p.w1_start, daysLeft: left(p.w1_start), tone: "slate" };
   if (today <= p.w1_end) {
     const span = diffDays(p.w1_start, p.w1_end);
-    const revStart = span >= 6 ? addDays(p.w1_start, 5) : span >= 2 ? p.w1_end : null;
+    // Revisi & finalisasi = 2 hari terakhir masa taqdim (Hari 6–7 dari 7; hari terakhir bila taqdim singkat)
+    const revStart = span >= 6 ? addDays(p.w1_end, -1) : span >= 2 ? p.w1_end : null;
     if (revStart && today >= revStart)
       return { ...base, key: "w1_rev", id: "w1_rev", step: 1, title: "Taqdim · Tenggat Revisi & Finalisasi", subtitle: "Selesaikan revisi konsep sebelum masa desain dimulai.", endsOn: p.w1_end, daysLeft: left(p.w1_end), tone: "green" };
     return { ...base, key: "w1", id: "w1", step: 1, title: `Taqdim ${q} Konsep Story`, subtitle: `Ajukan ${q} konsep (judul, ringkasan, poin visual) untuk divalidasi admin.`, endsOn: p.w1_end, daysLeft: left(p.w1_end), tone: "green" };
