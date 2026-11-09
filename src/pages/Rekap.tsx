@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { CopyButton, PageLoader, SectionTitle } from "../components/ui";
 import { activePeriodOf, must, useLive, usePeriods } from "../lib/hooks";
-import { emojiFor, monthLabel } from "../lib/rundown";
+import { emojiFor, monthLabel, quotaOf } from "../lib/rundown";
 import { supabase } from "../lib/supabase";
 import type { Member, PeriodFlag, Story } from "../lib/types";
 import { buildRecap } from "../lib/wa";
@@ -44,8 +44,8 @@ export default function Rekap() {
       count: data.stories.filter((s) => s.member_id === m.id && (!onlyAcc || s.qc_status === "acc")).length,
       excuse: data.flags.find((f) => f.member_id === m.id)?.excuse_note ?? null,
     }));
-    return buildRecap({ periodMonth: pm, emoji: emoji || "✨", rows, footer: footerOn ? data.footer : "", showZeroWarning: warn, onlyAcc });
-  }, [data, pm, onlyAcc, warn, emoji, footerOn]);
+    return buildRecap({ periodMonth: pm, emoji: emoji || "✨", rows, footer: footerOn ? data.footer : "", showZeroWarning: warn, onlyAcc, quota: quotaOf(period) });
+  }, [data, pm, onlyAcc, warn, emoji, footerOn, period]);
 
   if (lp) return <PageLoader />;
 

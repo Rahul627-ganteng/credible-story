@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { PhaseBanner } from "../../components/Rundown";
 import { PageLoader, ProgressBar, Stat } from "../../components/ui";
 import { must, useLive } from "../../lib/hooks";
-import { pendingReason, phaseOf, progressEmoji, progressFor } from "../../lib/rundown";
+import { pendingReason, phaseOf, progressEmoji, progressFor, quotaOf } from "../../lib/rundown";
 import { supabase } from "../../lib/supabase";
 import type { RundownPeriod } from "../../lib/types";
 import { useAdminData } from "./data";
@@ -24,12 +24,13 @@ export default function Overview({ period }: { period: RundownPeriod | null }) {
   if (loading || !data) return <PageLoader />;
   const active = data.members.filter((m) => m.is_active && m.role === "member");
   const ph = phaseOf(period);
-  const pending = active.filter((m) => pendingReason(ph.key, progressFor(m.id, data.concepts, data.stories)));
+  const q = quotaOf(period);
+  const pending = active.filter((m) => pendingReason(ph, progressFor(m.id, data.concepts, data.stories), q));
   const totalStories = data.stories.length;
   const conceptsPending = data.concepts.filter((c) => c.status === "pending").length;
   const qcPending = data.stories.filter((s) => s.qc_status === "pending_qc").length;
   const ranking = active.map((m) => ({ m, n: data.stories.filter((s) => s.member_id === m.id).length })).sort((a, b) => b.n - a.n || a.m.name.localeCompare(b.m.name));
-  const target = active.length * 3;
+  const target = active.length * q;
 
   return (
     <div className="space-y-5">
@@ -48,8 +49,8 @@ export default function Overview({ period }: { period: RundownPeriod | null }) {
             {ranking.map(({ m, n }) => (
               <div key={m.id} className="flex items-center gap-3">
                 <span className="w-40 truncate text-sm font-medium text-ink">{m.name}</span>
-                <div className="flex-1"><ProgressBar value={n} /></div>
-                <span className="w-12 text-right text-xs font-semibold text-ink-muted">{n}/3 {progressEmoji(n)}</span>
+                <div className="flex-1"><ProgressBar value={n} max={q} /></div>
+                <span className="w-12 text-right text-xs font-semibold text-ink-muted">{n}/{q} {progressEmoji(n, q)}</span>
               </div>
             ))}
           </div>

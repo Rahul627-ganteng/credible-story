@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { PhaseBanner } from "../components/Rundown";
 import { ConceptBadge, Field, PageLoader, SectionTitle, Spinner, useToast } from "../components/ui";
 import { activePeriodOf, must, useLive, usePeriods } from "../lib/hooks";
-import { monthLabel } from "../lib/rundown";
+import { fmtDate, monthLabel, quotaOf, storyNums } from "../lib/rundown";
 import { errMsg, supabase } from "../lib/supabase";
 import type { Concept, RundownPeriod } from "../lib/types";
 
@@ -25,9 +25,9 @@ export default function Taqdim() {
   return (
     <div className="space-y-6">
       <SectionTitle
-        eyebrow="Minggu 1 · Hari 1–7"
-        title="Taqdim 3 Konsep Story"
-        desc="Ajukan judul, ringkasan materi, dan poin utama visual untuk 3 story bulan ini. Admin akan memberi ACC atau catatan revisi."
+        eyebrow={period ? `Taqdim · ${fmtDate(period.w1_start)} – ${fmtDate(period.w1_end)}` : "Taqdim konsep"}
+        title={`Taqdim ${quotaOf(period)} Konsep Story`}
+        desc={`Ajukan judul, ringkasan materi, dan poin utama visual untuk ${quotaOf(period)} story bulan ini. Admin akan memberi ACC atau catatan revisi.`}
         action={
           <select className="input w-auto" value={pm} onChange={(e) => setPm(e.target.value)} aria-label="Periode">
             {(periods ?? []).map((p) => <option key={p.id} value={p.period_month}>{p.emoji} {monthLabel(p.period_month)}{p.is_locked ? " (terkunci)" : ""}</option>)}
@@ -36,9 +36,9 @@ export default function Taqdim() {
       />
       <PhaseBanner period={period} compact />
       {loading ? <PageLoader /> : (
-        <div className="grid gap-5 lg:grid-cols-3">
-          {[1, 2, 3].map((n) => (
-            <ConceptCard key={`${pm}-${n}`} n={n as 1 | 2 | 3} period={period} memberId={member.id} concept={concepts?.find((c) => c.story_number === n) ?? null} />
+        <div className={`grid gap-5 ${quotaOf(period) === 4 ? "md:grid-cols-2 xl:grid-cols-4" : "lg:grid-cols-3"}`}>
+          {storyNums(quotaOf(period)).map((n) => (
+            <ConceptCard key={`${pm}-${n}`} n={n} period={period} memberId={member.id} concept={concepts?.find((c) => c.story_number === n) ?? null} />
           ))}
         </div>
       )}
@@ -46,7 +46,7 @@ export default function Taqdim() {
   );
 }
 
-function ConceptCard({ n, period, memberId, concept }: { n: 1 | 2 | 3; period: RundownPeriod | null; memberId: string; concept: Concept | null }) {
+function ConceptCard({ n, period, memberId, concept }: { n: number; period: RundownPeriod | null; memberId: string; concept: Concept | null }) {
   const toast = useToast();
   const [title, setTitle] = useState(concept?.title ?? "");
   const [summary, setSummary] = useState(concept?.summary ?? "");

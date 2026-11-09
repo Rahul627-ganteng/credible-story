@@ -1,7 +1,7 @@
 import { Check, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { ConceptBadge, Empty, Modal, PageLoader, Spinner, useToast } from "../../components/ui";
-import { fmtDateTime } from "../../lib/rundown";
+import { fmtDateTime, quotaOf } from "../../lib/rundown";
 import { errMsg, supabase } from "../../lib/supabase";
 import type { Concept, RundownPeriod } from "../../lib/types";
 import { useAdminData } from "./data";
@@ -22,7 +22,8 @@ export default function ConceptReview({ period }: { period: RundownPeriod | null
     .sort((a, b) => (nameOf(a.member_id)?.name ?? "").localeCompare(nameOf(b.member_id)?.name ?? "") || a.story_number - b.story_number);
   const counts = { pending: 0, revision: 0, acc: 0 } as Record<string, number>;
   data.concepts.forEach((c) => counts[c.status]++);
-  const notYet = data.members.filter((m) => m.is_active && m.role === "member" && data.concepts.filter((c) => c.member_id === m.id).length < 3);
+  const q = quotaOf(period);
+  const notYet = data.members.filter((m) => m.is_active && m.role === "member" && data.concepts.filter((c) => c.member_id === m.id).length < q);
 
   const acc = async (c: Concept) => {
     setBusy(c.id);
@@ -87,9 +88,9 @@ export default function ConceptReview({ period }: { period: RundownPeriod | null
 
       {notYet.length > 0 && (
         <div className="card p-5">
-          <p className="label">Belum lengkap mengajukan 3 konsep ({notYet.length})</p>
+          <p className="label">Belum lengkap mengajukan {q} konsep ({notYet.length})</p>
           <div className="flex flex-wrap gap-1.5">
-            {notYet.map((m) => <span key={m.id} className="badge-slate">{m.name} · {data.concepts.filter((c) => c.member_id === m.id).length}/3</span>)}
+            {notYet.map((m) => <span key={m.id} className="badge-slate">{m.name} · {data.concepts.filter((c) => c.member_id === m.id).length}/{q}</span>)}
           </div>
         </div>
       )}

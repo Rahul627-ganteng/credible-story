@@ -39,7 +39,7 @@ export default function Recruitment() {
     if (!form.category) return setErr("Pilih kategori Ikhwan atau Akhwat.");
     if (!normalizePhone(form.phone_number)) return setErr("Nomor WhatsApp tidak valid. Contoh: 0812xxxxxxx");
     if (!apps.length) return setErr("Pilih minimal satu software desain yang dikuasai.");
-    if (!form.commitment) return setErr("Centang persetujuan komitmen rundown 3 story/bulan.");
+    if (!form.commitment) return setErr("Centang persetujuan komitmen rundown 4 story/bulan.");
     const urls = form.portfolio.split(/\s+/).map((s) => s.trim()).filter((s) => /^https?:\/\//.test(s)).slice(0, 5);
     if (!files.length && !urls.length) return setErr("Lampirkan minimal 1 sampel karya (unggah gambar atau tempel link portofolio).");
 
@@ -99,8 +99,8 @@ export default function Recruitment() {
         </p>
         <ol className="mt-8 space-y-4">
           {[
-            ["Taqdim 3 konsep", "Di awal bulan kamu mengajukan 3 ide story untuk divalidasi."],
-            ["Desain 1 story per minggu", "Minggu 2, 3, dan 4 masing-masing satu story 9:16."],
+            ["Taqdim 4 konsep", "Di awal bulan kamu mengajukan 4 ide story untuk divalidasi admin."],
+            ["Desain 1 story per minggu", "Empat story 9:16 per bulan, masing-masing dengan tenggat mingguan."],
             ["Belajar bareng", "Akses Learning Hub dengan materi baru setiap 2 hari."],
           ].map(([t, d], i) => (
             <li key={t} className="flex gap-3">
@@ -186,7 +186,7 @@ export default function Recruitment() {
 
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-crimson-200 bg-crimson-50 p-4 text-sm text-crimson-800">
           <input type="checkbox" className="mt-0.5 h-4 w-4 accent-crimson-600" checked={form.commitment} onChange={(e) => set("commitment", e.target.checked)} />
-          <span>Saya bersedia mengikuti <b>rundown bulanan</b>: taqdim 3 konsep di Minggu 1 dan menyetor <b>3 content story setiap bulan</b>, serta berkabar ke admin bila ada kendala.</span>
+          <span>Saya bersedia mengikuti <b>rundown bulanan</b>: taqdim 4 konsep di awal bulan dan menyetor <b>4 content story setiap bulan</b>, serta berkabar ke admin bila ada kendala.</span>
         </label>
 
         {err && <p className="rounded-xl bg-crimson-50 px-3 py-2 text-sm font-medium text-crimson-800">{err}</p>}

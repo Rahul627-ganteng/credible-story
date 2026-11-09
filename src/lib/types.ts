@@ -27,6 +27,10 @@ export interface RundownPeriod {
   w2_start: string; w2_end: string;
   w3_start: string; w3_end: string;
   w4_start: string; w4_end: string;
+  /** Target story per bulan (Okt 2026 ke belakang: 3; mulai Nov 2026: 4) */
+  story_quota: number;
+  /** Tenggat tiap story (panjang = story_quota) */
+  story_deadlines: string[] | null;
   sks_start: string | null;
   recap_date: string | null;
   monthly_evaluation_notes: string | null;
@@ -39,7 +43,7 @@ export interface Concept {
   id: string;
   member_id: string;
   period_month: string;
-  story_number: 1 | 2 | 3;
+  story_number: number;
   title: string;
   summary: string;
   visual_points: string | null;
@@ -56,7 +60,7 @@ export interface Story {
   member_name: string | null;
   category: Category | null;
   period_month: string;
-  story_target: 1 | 2 | 3;
+  story_target: number;
   title: string | null;
   submission_mode: "file" | "link";
   file_url: string;

@@ -2,7 +2,7 @@ import { AlertTriangle, FolderOpen, KeyRound, MessageCircle, Pencil, RotateCcw, 
 import { useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { Field, Modal, PageLoader, Spinner, useToast } from "../../components/ui";
-import { phaseOf } from "../../lib/rundown";
+import { isLatePhase, phaseOf, quotaOf } from "../../lib/rundown";
 import { errMsg, supabase } from "../../lib/supabase";
 import { DESIGN_APPS, type Category, type Credentials, type Member, type RundownPeriod } from "../../lib/types";
 import { normalizePhone, retentionMessage, terminationNotice, waLink } from "../../lib/wa";
@@ -23,7 +23,7 @@ export default function Members({ period }: { period: RundownPeriod | null }) {
 
   if (loading || !data) return <PageLoader />;
   const ph = phaseOf(period);
-  const late = ph.week >= 4;
+  const late = isLatePhase(ph, quotaOf(period));
   const countOf = (id: string) => data.stories.filter((s) => s.member_id === id).length;
   const flagOf = (id: string) => data.flags.find((f) => f.member_id === id);
   const isSilent = (m: Member) => m.is_active && m.role === "member" && countOf(m.id) === 0 && !flagOf(m.id)?.has_kabar;
@@ -73,7 +73,7 @@ export default function Members({ period }: { period: RundownPeriod | null }) {
 
       {view === "radar" && (
         <div className="rounded-xl border border-crimson-200 bg-crimson-50 px-4 py-3 text-sm text-crimson-900">
-          <b>Radar Member Tidak Aktif.</b> Anggota dengan 0 setoran dan tanpa kabar {late ? "hingga Minggu 4" : "(muncul otomatis mulai Minggu 4)"}, serta yang sedang dalam proses konfirmasi kelanjutan.
+          <b>Radar Member Tidak Aktif.</b> Anggota dengan 0 setoran dan tanpa kabar {late ? "hingga story terakhir bulan ini" : "(muncul otomatis saat masuk story terakhir / fase SKS)"}, serta yang sedang dalam proses konfirmasi kelanjutan.
         </div>
       )}
 
@@ -92,7 +92,7 @@ export default function Members({ period }: { period: RundownPeriod | null }) {
                   </td>
                   <td>{m.category ?? (m.role === "admin" ? "Admin" : "-")}</td>
                   <td className="font-mono text-xs">{data.phones[m.id] ?? <span className="text-crimson-700">belum diisi</span>}</td>
-                  <td>{n}/3 {flagOf(m.id)?.has_kabar && n === 0 && <span className="badge-slate ml-1">ada kabar</span>}</td>
+                  <td>{n}/{quotaOf(period)} {flagOf(m.id)?.has_kabar && n === 0 && <span className="badge-slate ml-1">ada kabar</span>}</td>
                   <td className="space-y-1">
                     <StatusBadge status={m.status} response={m.retention_response} />
                     {silent && <span className="badge-red flex w-fit"><AlertTriangle className="h-3 w-3" /> TIDAK AKTIF / TANPA KABAR</span>}

@@ -5,7 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import { PhaseBanner } from "../components/Rundown";
 import { Field, PageLoader, ProgressBar, QcBadge, SectionTitle, Spinner, useToast } from "../components/ui";
 import { activePeriodOf, must, previewUrl, useLive, usePeriods } from "../lib/hooks";
-import { monthLabel, progressEmoji } from "../lib/rundown";
+import { deadlinesOf, fmtDate, monthLabel, progressEmoji, quotaOf, storyNums } from "../lib/rundown";
 import { compressStory } from "../lib/image";
 import { errMsg, supabase } from "../lib/supabase";
 import { DESIGN_APPS, type Concept, type Member, type Story } from "../lib/types";
@@ -39,7 +39,9 @@ export default function Setoran() {
     return { concepts: must(c) as Concept[], stories: must(s) as Story[] };
   }, [target?.id, pm], ["concept_submissions", "story_submissions"]);
 
-  const [storyN, setStoryN] = useState<1 | 2 | 3>(1);
+  const [storyN, setStoryN] = useState<number>(1);
+  const q = quotaOf(period);
+  const dls = deadlinesOf(period);
   const [mode, setMode] = useState<"file" | "link">("file");
   const [file, setFile] = useState<File | null>(null);
   const [link, setLink] = useState("");
@@ -55,7 +57,7 @@ export default function Setoran() {
 
   useEffect(() => {
     // pilih otomatis story pertama yang belum disetor
-    const next = ([1, 2, 3] as const).find((n) => !stories.some((s) => s.story_target === n));
+    const next = storyNums(q).find((n) => !stories.some((s) => s.story_target === n));
     if (next) setStoryN(next);
   }, [stories.length, target?.id]);
 
@@ -110,7 +112,7 @@ export default function Setoran() {
   return (
     <div className="space-y-6">
       <SectionTitle
-        eyebrow="Minggu 2 – 4"
+        eyebrow={`Target ${q} story · ${period ? monthLabel(period.period_month) : ""}`}
         title="Portal Setoran Story"
         desc="Pilih target story — judul konsep yang sudah di-ACC muncul otomatis. Unggah gambar (dikompres otomatis) atau tempel link Google Drive/Canva."
         action={
@@ -145,13 +147,14 @@ export default function Setoran() {
             <>
               <div>
                 <span className="label">Target story</span>
-                <div className="grid grid-cols-3 gap-2">
-                  {([1, 2, 3] as const).map((n) => {
+                <div className={`grid gap-2 ${q === 4 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
+                  {storyNums(q).map((n) => {
                     const done = stories.some((s) => s.story_target === n);
                     return (
                       <button key={n} type="button" onClick={() => setStoryN(n)}
                         className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${storyN === n ? "border-crimson-600 bg-crimson-50 text-crimson-800 ring-2 ring-crimson-500/15" : "border-slate-300 bg-white text-ink hover:border-slate-400"}`}>
                         Story {n} (Wajib) {done && "✓"}
+                        {dls[n - 1] && <span className="block text-[11px] font-medium opacity-70">tenggat {fmtDate(dls[n - 1])}</span>}
                       </button>
                     );
                   })}
@@ -223,11 +226,11 @@ export default function Setoran() {
           <div className="card p-5">
             <p className="label">Status Card {period && `· ${monthLabel(period.period_month)}`}</p>
             <div className="flex items-center gap-4">
-              <p className="font-display text-5xl font-extrabold text-ink">{count}/3</p>
-              <span className="text-4xl">{progressEmoji(count)}</span>
+              <p className="font-display text-5xl font-extrabold text-ink">{count}/{q}</p>
+              <span className="text-4xl">{progressEmoji(count, q)}</span>
             </div>
-            <p className="mb-3 text-sm text-ink-muted">{count >= 3 ? "Target tuntas! Barakallahu fiik 🎉" : count === 2 ? "Satu lagi, gaspol! 🚀" : count === 1 ? "Awal yang bagus, lanjutkan 💪" : "Belum ada setoran bulan ini."}</p>
-            <ProgressBar value={count} />
+            <p className="mb-3 text-sm text-ink-muted">{count >= q ? "Target tuntas! Barakallahu fiik 🎉" : count === q - 1 ? "Satu lagi, gaspol! 🚀" : count >= 1 ? `Lanjutkan, ${q - count} story lagi 💪` : "Belum ada setoran bulan ini."}</p>
+            <ProgressBar value={count} max={q} />
             {target?.folder_url && (
               <a href={target.folder_url} target="_blank" rel="noreferrer" className="btn-ghost mt-4 w-full"><FolderOpen className="h-4 w-4" /> Cek Folder Drive {isAdmin ? target.name.split(" ")[0] : "saya"}</a>
             )}

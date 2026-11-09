@@ -53,7 +53,7 @@ export default function Login() {
           </div>
           <div className="flex items-end justify-between gap-6">
             <img src="/brand/official-white.webp" alt="Official Story of Credible Generation" className="h-8 w-auto opacity-80" />
-            <div className="flex gap-4 text-xs text-white/60"><span>🟢 Taqdim</span><span>🔵 Story 1</span><span>🔴 Story 2</span><span>🟡 Story 3</span></div>
+            <div className="flex gap-4 text-xs text-white/60"><span>🟢 Taqdim</span><span>🔵 Story 1</span><span>🔴 Story 2</span><span>🟠 Story 3</span><span>🟣 Story 4</span></div>
           </div>
         </div>
       </div>

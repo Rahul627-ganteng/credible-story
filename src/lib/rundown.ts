@@ -37,33 +37,70 @@ export function fmtDateTime(iso: string | null | undefined): string {
   return new Intl.DateTimeFormat("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 }
 
-/** Preset standar Hari 1–30 untuk bulan tertentu */
-export function standardPreset(pm: string) {
-  const [y, m] = pm.split("-").map(Number);
-  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const d = (n: number) => `${pm}-${String(Math.min(n, last)).padStart(2, "0")}`;
-  return {
-    w1_start: d(1), w1_end: d(7), w2_start: d(8), w2_end: d(14), w3_start: d(15), w3_end: d(21),
-    w4_start: d(22), w4_end: d(last), sks_start: d(27), recap_date: d(last),
-  };
+export interface PeriodDates {
+  w1_start: string; w1_end: string;
+  w2_start: string; w2_end: string;
+  w3_start: string; w3_end: string;
+  w4_start: string; w4_end: string;
+  sks_start: string; recap_date: string;
+  story_quota: number;
+  story_deadlines: string[];
 }
-/** Preset bergeser ala "Rundown Oktober": Taqdim s/d tgl X, lalu 3 blok desain 7 hari */
-export function shiftedPreset(pm: string, taqdimDay = 10) {
-  const [y, m] = pm.split("-").map(Number);
-  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const d = (n: number) => `${pm}-${String(Math.min(n, last)).padStart(2, "0")}`;
+
+const lastDayOf = (pm: string) => { const [y, m] = pm.split("-").map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
+const dayOf = (pm: string, n: number) => `${pm}-${String(Math.max(1, Math.min(n, lastDayOf(pm)))).padStart(2, "0")}`;
+
+/** Kolom w2–w4 lama diisi dari tenggat story agar tetap konsisten */
+export function legacyWindows(pm: string, taqdimEnd: string, deadlines: string[]) {
+  const last = dayOf(pm, 31);
+  const d1 = deadlines[0] ?? last, d2 = deadlines[1] ?? d1;
   return {
-    w1_start: d(1), w1_end: d(taqdimDay), w2_start: d(taqdimDay + 1), w2_end: d(taqdimDay + 7),
-    w3_start: d(taqdimDay + 8), w3_end: d(taqdimDay + 14), w4_start: d(taqdimDay + 15), w4_end: d(last),
-    sks_start: d(last - 2), recap_date: d(last),
+    w2_start: addDays(taqdimEnd, 1), w2_end: d1,
+    w3_start: addDays(d1, 1) > d2 ? d2 : addDays(d1, 1), w3_end: d2,
+    w4_start: addDays(d2, 1) > last ? last : addDays(d2, 1), w4_end: last,
   };
 }
 
-export type PhaseKey = "pre" | "w1" | "w1_rev" | "w2" | "w3" | "w4" | "sks" | "done";
+/** Preset mingguan: tenggat story mundur 7 hari dari akhir bulan; taqdim di sisa awal bulan (Nov: Taqdim 1–3, tenggat 9/16/23/30) */
+export function weeklyPreset(pm: string, quota = 4): PeriodDates {
+  const last = lastDayOf(pm);
+  const deadlines = Array.from({ length: quota }, (_, i) => dayOf(pm, last - 7 * (quota - 1 - i)));
+  const taqdimEnd = dayOf(pm, Math.max(1, Number(deadlines[0].slice(8)) - 6));
+  return {
+    w1_start: dayOf(pm, 1), w1_end: taqdimEnd, ...legacyWindows(pm, taqdimEnd, deadlines),
+    sks_start: dayOf(pm, last - 3), recap_date: dayOf(pm, last), story_quota: quota, story_deadlines: deadlines,
+  };
+}
+
+/** Preset ala "Rundown Oktober": Taqdim s/d tanggal X, sisa bulan dibagi rata untuk tiap story */
+export function evenPreset(pm: string, quota = 4, taqdimDay = 10): PeriodDates {
+  const last = lastDayOf(pm);
+  const span = last - taqdimDay;
+  const deadlines = Array.from({ length: quota }, (_, i) => dayOf(pm, taqdimDay + Math.round((span * (i + 1)) / quota)));
+  const taqdimEnd = dayOf(pm, taqdimDay);
+  return {
+    w1_start: dayOf(pm, 1), w1_end: taqdimEnd, ...legacyWindows(pm, taqdimEnd, deadlines),
+    sks_start: dayOf(pm, last - 2), recap_date: dayOf(pm, last), story_quota: quota, story_deadlines: deadlines,
+  };
+}
+
+export const quotaOf = (p: RundownPeriod | null | undefined) => p?.story_quota ?? 4;
+export function deadlinesOf(p: RundownPeriod | null | undefined): string[] {
+  if (!p) return [];
+  if (p.story_deadlines?.length) return p.story_deadlines;
+  return [p.w2_end, p.w3_end, p.w4_end].slice(0, quotaOf(p));
+}
+export const storyNums = (quota: number) => Array.from({ length: quota }, (_, i) => i + 1);
+
+export type PhaseKey = "pre" | "w1" | "w1_rev" | "story" | "sks" | "done";
 
 export interface PhaseInfo {
   key: PhaseKey;
-  week: 0 | 1 | 2 | 3 | 4 | 5;
+  /** id unik fase, mis. "w1", "story:2", "sks" */
+  id: string;
+  storyN: number | null;
+  /** urutan untuk tampilan: 0 pra, 1 taqdim, 1+n story ke-n, 99 selesai */
+  step: number;
   title: string;
   subtitle: string;
   endsOn: string | null;
@@ -71,26 +108,65 @@ export interface PhaseInfo {
   tone: "green" | "blue" | "red" | "amber" | "slate";
 }
 
+const TONES: PhaseInfo["tone"][] = ["blue", "red", "amber", "blue", "red", "amber"];
+
+function storyPhase(p: RundownPeriod, n: number, today: string): PhaseInfo {
+  const dl = deadlinesOf(p)[n - 1];
+  return {
+    key: "story", id: `story:${n}`, storyN: n, step: 1 + n,
+    title: `Story ${n} · Pengerjaan & QC`, subtitle: `Story ${n} wajib disetor paling lambat ${fmtDate(dl)}.`,
+    endsOn: dl, daysLeft: diffDays(today, dl), tone: TONES[(n - 1) % TONES.length],
+  };
+}
+
 export function phaseOf(p: RundownPeriod | null | undefined, today = todayJakarta()): PhaseInfo {
-  if (!p) return { key: "pre", week: 0, title: "Belum ada rundown aktif", subtitle: "Admin belum mengaktifkan periode.", endsOn: null, daysLeft: null, tone: "slate" };
+  const base = { storyN: null, endsOn: null, daysLeft: null } as const;
+  if (!p) return { ...base, key: "pre", id: "pre", step: 0, title: "Belum ada rundown aktif", subtitle: "Admin belum mengaktifkan periode.", tone: "slate" };
+  const q = quotaOf(p);
   const left = (end: string) => diffDays(today, end);
-  if (today < p.w1_start) return { key: "pre", week: 0, title: "Rundown belum dimulai", subtitle: `Dimulai ${fmtDate(p.w1_start)}`, endsOn: p.w1_start, daysLeft: left(p.w1_start), tone: "slate" };
+  if (today < p.w1_start) return { ...base, key: "pre", id: "pre", step: 0, title: "Rundown belum dimulai", subtitle: `Dimulai ${fmtDate(p.w1_start)}`, endsOn: p.w1_start, daysLeft: left(p.w1_start), tone: "slate" };
   if (today <= p.w1_end) {
     const span = diffDays(p.w1_start, p.w1_end);
-    const revStart = span >= 6 ? addDays(p.w1_start, 5) : p.w1_end;
-    if (today >= revStart && span >= 6)
-      return { key: "w1_rev", week: 1, title: "Minggu 1 · Tenggat Revisi & Finalisasi Taqdim", subtitle: "Selesaikan revisi konsep sebelum minggu desain dimulai.", endsOn: p.w1_end, daysLeft: left(p.w1_end), tone: "green" };
-    return { key: "w1", week: 1, title: "Minggu 1 · Taqdim 3 Konsep Story", subtitle: "Ajukan 3 konsep (judul, ringkasan, poin visual) untuk divalidasi admin.", endsOn: p.w1_end, daysLeft: left(p.w1_end), tone: "green" };
+    const revStart = span >= 6 ? addDays(p.w1_start, 5) : span >= 2 ? p.w1_end : null;
+    if (revStart && today >= revStart)
+      return { ...base, key: "w1_rev", id: "w1_rev", step: 1, title: "Taqdim · Tenggat Revisi & Finalisasi", subtitle: "Selesaikan revisi konsep sebelum masa desain dimulai.", endsOn: p.w1_end, daysLeft: left(p.w1_end), tone: "green" };
+    return { ...base, key: "w1", id: "w1", step: 1, title: `Taqdim ${q} Konsep Story`, subtitle: `Ajukan ${q} konsep (judul, ringkasan, poin visual) untuk divalidasi admin.`, endsOn: p.w1_end, daysLeft: left(p.w1_end), tone: "green" };
   }
-  if (today <= p.w2_end) return { key: "w2", week: 2, title: "Minggu 2 · Pengerjaan & QC Story 1", subtitle: `Story 1 wajib disetor paling lambat ${fmtDate(p.w2_end)}.`, endsOn: p.w2_end, daysLeft: left(p.w2_end), tone: "blue" };
-  if (today <= p.w3_end) return { key: "w3", week: 3, title: "Minggu 3 · Pengerjaan & QC Story 2", subtitle: `Story 2 wajib disetor paling lambat ${fmtDate(p.w3_end)}.`, endsOn: p.w3_end, daysLeft: left(p.w3_end), tone: "red" };
-  if (today <= p.w4_end) {
-    if (p.sks_start && today >= p.sks_start)
-      return { key: "sks", week: 4, title: "Minggu 4 · Fase SKS & Validasi Akhir", subtitle: "Tuntaskan Story 1–3. Butuh bantuan? Desain Bareng Admin, AYO!", endsOn: p.w4_end, daysLeft: left(p.w4_end), tone: "amber" };
-    return { key: "w4", week: 4, title: "Minggu 4 · Pengerjaan & QC Story 3", subtitle: `Story 3 dan seluruh setoran tuntas sebelum ${fmtDate(p.w4_end)}.`, endsOn: p.w4_end, daysLeft: left(p.w4_end), tone: "amber" };
-  }
-  return { key: "done", week: 5, title: "Rundown selesai · Evaluasi Bulanan", subtitle: "Rekap dan evaluasi bulan ini sedang/sudah dipublikasikan.", endsOn: null, daysLeft: null, tone: "slate" };
+  const dls = deadlinesOf(p);
+  const lastDl = dls[dls.length - 1] ?? p.w4_end;
+  if (p.sks_start && today >= p.sks_start && today <= lastDl)
+    return { ...base, key: "sks", id: "sks", step: 1 + q, title: "Fase SKS & Validasi Akhir", subtitle: `Tuntaskan Story 1–${q}. Butuh bantuan? Desain Bareng Admin, AYO!`, endsOn: lastDl, daysLeft: left(lastDl), tone: "amber" };
+  const n = dls.findIndex((d) => today <= d);
+  if (n >= 0) return storyPhase(p, n + 1, today);
+  return { ...base, key: "done", id: "done", step: 99, title: "Rundown selesai · Evaluasi Bulanan", subtitle: "Rekap dan evaluasi bulan ini sedang/sudah dipublikasikan.", tone: "slate" };
 }
+
+/** Daftar fase yang bisa dipilih manual (panel pengingat) */
+export function phaseList(p: RundownPeriod | null | undefined): { id: string; label: string }[] {
+  if (!p) return [];
+  const dls = deadlinesOf(p);
+  return [
+    { id: "w1", label: `Taqdim ${quotaOf(p)} konsep (s/d ${fmtDate(p.w1_end)})` },
+    { id: "w1_rev", label: "Taqdim · revisi & finalisasi" },
+    ...dls.map((d, i) => ({ id: `story:${i + 1}`, label: `Story ${i + 1} (tenggat ${fmtDate(d)})` })),
+    { id: "sks", label: `SKS & Desain Bareng${p.sks_start ? ` (mulai ${fmtDate(p.sks_start)})` : ""}` },
+  ];
+}
+
+export function phaseById(p: RundownPeriod | null | undefined, id: string, today = todayJakarta()): PhaseInfo {
+  const cur = phaseOf(p, today);
+  if (!p || id === cur.id) return cur;
+  const q = quotaOf(p);
+  const base = { storyN: null, endsOn: null, daysLeft: null } as const;
+  if (id === "w1") return { ...base, key: "w1", id, step: 1, title: `Taqdim ${q} Konsep Story`, subtitle: "", endsOn: p.w1_end, tone: "green" };
+  if (id === "w1_rev") return { ...base, key: "w1_rev", id, step: 1, title: "Taqdim · Revisi", subtitle: "", endsOn: p.w1_end, tone: "green" };
+  if (id === "sks") return { ...base, key: "sks", id, step: 1 + q, title: "Fase SKS", subtitle: "", endsOn: deadlinesOf(p)[q - 1] ?? null, tone: "amber" };
+  if (id.startsWith("story:")) return storyPhase(p, Number(id.split(":")[1]), today);
+  return cur;
+}
+
+/** Fase akhir bulan: radar "tidak aktif / tanpa kabar" mulai berlaku */
+export const isLatePhase = (ph: PhaseInfo, quota: number) => ph.key === "sks" || ph.key === "done" || (ph.key === "story" && (ph.storyN ?? 0) >= quota);
 
 export interface MemberProgress {
   conceptsSubmitted: number;
@@ -98,7 +174,7 @@ export interface MemberProgress {
   conceptsRevision: number;
   storiesSubmitted: number;
   storiesAcc: number;
-  has: (n: 1 | 2 | 3) => boolean;
+  has: (n: number) => boolean;
 }
 
 export function progressFor(memberId: string, concepts: Concept[], stories: Story[]): MemberProgress {
@@ -115,29 +191,30 @@ export function progressFor(memberId: string, concepts: Concept[], stories: Stor
 }
 
 /** Alasan member belum memenuhi target fase yang sedang berjalan (null = sudah aman) */
-export function pendingReason(phase: PhaseKey, pr: MemberProgress): string | null {
-  switch (phase) {
+export function pendingReason(ph: PhaseInfo, pr: MemberProgress, quota: number): string | null {
+  switch (ph.key) {
     case "w1":
     case "w1_rev":
-      if (pr.conceptsSubmitted < 3) return `Belum taqdim konsep (${pr.conceptsSubmitted}/3)`;
+      if (pr.conceptsSubmitted < quota) return `Belum taqdim konsep (${pr.conceptsSubmitted}/${quota})`;
       if (pr.conceptsRevision > 0) return `${pr.conceptsRevision} konsep perlu revisi`;
       return null;
-    case "w2":
-      return pr.has(1) ? null : "Belum setor Story 1";
-    case "w3": {
-      const miss = [1, 2].filter((n) => !pr.has(n as 1 | 2));
-      return miss.length ? `Belum setor Story ${miss.join(" & ")}` : null;
+    case "story": {
+      const upto = ph.storyN ?? 1;
+      const miss = storyNums(upto).filter((n) => !pr.has(n));
+      if (!miss.length) return null;
+      return upto >= quota ? `Belum tuntas: Story ${miss.join(", ")} (${quota - miss.length}/${quota})` : `Belum setor Story ${miss.join(" & ")}`;
     }
-    case "w4":
     case "sks": {
-      const miss = [1, 2, 3].filter((n) => !pr.has(n as 1 | 2 | 3));
-      return miss.length ? `Belum tuntas: Story ${miss.join(", ")} (${3 - miss.length}/3)` : null;
+      const miss = storyNums(quota).filter((n) => !pr.has(n));
+      return miss.length ? `Belum tuntas: Story ${miss.join(", ")} (${quota - miss.length}/${quota})` : null;
     }
     default:
       return null;
   }
 }
 
-export function progressEmoji(n: number): string {
-  return n >= 3 ? "🎉" : n === 2 ? "🚀" : n === 1 ? "💪" : "⏳";
+export function progressEmoji(n: number, quota = 4): string {
+  if (n >= quota) return "🎉";
+  if (n === 0) return "⏳";
+  return n >= quota - 1 ? "🚀" : n >= Math.ceil(quota / 2) ? "🔥" : "💪";
 }

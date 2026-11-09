@@ -5,7 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import { PhaseBanner } from "../components/Rundown";
 import { ConceptBadge, Markdown, PageLoader, ProgressBar, QcBadge, Spinner, useToast } from "../components/ui";
 import { activePeriodOf, must, useLive, usePeriods } from "../lib/hooks";
-import { fmtDateTime, monthLabel, phaseOf, progressEmoji } from "../lib/rundown";
+import { fmtDateTime, monthLabel, phaseOf, progressEmoji, quotaOf, storyNums } from "../lib/rundown";
 import { errMsg, supabase } from "../lib/supabase";
 import type { Concept, LearningMaterial, Story } from "../lib/types";
 import { normalizePhone } from "../lib/wa";
@@ -32,6 +32,7 @@ export default function Dashboard() {
   const stories = data?.stories ?? [];
   const done = stories.length;
   const ph = phaseOf(period);
+  const q = quotaOf(period);
 
   return (
     <div className="space-y-6">
@@ -51,16 +52,16 @@ export default function Dashboard() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="label">Progres {period ? monthLabel(pm) : ""}</p>
-              <p className="font-display text-4xl font-extrabold text-ink">{done}/3 <span className="text-3xl">{progressEmoji(done)}</span></p>
-              <p className="text-sm text-ink-muted">{done >= 3 ? "MasyaAllah, target bulan ini tuntas!" : `${3 - done} story lagi menuju target bulan ini.`}</p>
+              <p className="font-display text-4xl font-extrabold text-ink">{done}/{q} <span className="text-3xl">{progressEmoji(done, q)}</span></p>
+              <p className="text-sm text-ink-muted">{done >= q ? "MasyaAllah, target bulan ini tuntas!" : `${q - done} story lagi menuju target ${q} story bulan ini.`}</p>
             </div>
             {member.folder_url && (
               <a href={member.folder_url} target="_blank" rel="noreferrer" className="btn-ghost btn-sm"><FolderOpen className="h-4 w-4" /> Folder Drive</a>
             )}
           </div>
-          <div className="mt-4"><ProgressBar value={done} /></div>
+          <div className="mt-4"><ProgressBar value={done} max={q} /></div>
           <div className="mt-5 divide-y divide-slate-100 rounded-xl border border-slate-200">
-            {[1, 2, 3].map((n) => {
+            {storyNums(q).map((n) => {
               const c = concepts.find((x) => x.story_number === n);
               const s = stories.find((x) => x.story_target === n);
               return (
@@ -75,8 +76,8 @@ export default function Dashboard() {
             })}
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Link to="/app/taqdim" className={ph.week === 1 ? "btn-primary" : "btn-ghost"}><ClipboardList className="h-4 w-4" /> Taqdim Konsep</Link>
-            <Link to="/app/setoran" className={ph.week >= 2 && ph.week <= 4 ? "btn-primary" : "btn-ghost"}><Upload className="h-4 w-4" /> Setor Story</Link>
+            <Link to="/app/taqdim" className={ph.step === 1 ? "btn-primary" : "btn-ghost"}><ClipboardList className="h-4 w-4" /> Taqdim Konsep</Link>
+            <Link to="/app/setoran" className={ph.key === "story" || ph.key === "sks" ? "btn-primary" : "btn-ghost"}><Upload className="h-4 w-4" /> Setor Story</Link>
           </div>
         </div>
 

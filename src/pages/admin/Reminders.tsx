@@ -2,28 +2,23 @@ import { AlertTriangle, CheckCircle2, Ghost, MessageCircle, Palette, Send, Siren
 import { useEffect, useState } from "react";
 import { PhaseBanner } from "../../components/Rundown";
 import { Empty, PageLoader, Spinner, useToast } from "../../components/ui";
-import { fmtDateTime, pendingReason, phaseOf, progressFor, type PhaseKey } from "../../lib/rundown";
+import { fmtDateTime, isLatePhase, pendingReason, phaseById, phaseList, phaseOf, progressFor, quotaOf } from "../../lib/rundown";
 import { errMsg, supabase } from "../../lib/supabase";
 import type { Member, RundownPeriod } from "../../lib/types";
 import { designBarengMessage, reminderMessage, waLink } from "../../lib/wa";
 import { logReminder, upsertFlag, useAdminData } from "./data";
 
-const PHASES: { key: PhaseKey; label: string }[] = [
-  { key: "w1", label: "Minggu 1 · Hari 1–5 (Taqdim)" },
-  { key: "w1_rev", label: "Minggu 1 · Hari 6–7 (Revisi)" },
-  { key: "w2", label: "Minggu 2 · Story 1" },
-  { key: "w3", label: "Minggu 3 · Story 2" },
-  { key: "w4", label: "Minggu 4 · Story 3" },
-  { key: "sks", label: "Hari 27–29 · SKS & Desain Bareng" },
-];
 
 export default function Reminders({ period }: { period: RundownPeriod | null }) {
   const pm = period?.period_month ?? "";
   const toast = useToast();
   const { data, loading, reload } = useAdminData(pm);
-  const auto = phaseOf(period).key;
-  const [phase, setPhase] = useState<PhaseKey>(auto);
-  useEffect(() => setPhase(PHASES.some((p) => p.key === auto) ? auto : "w1"), [auto, pm]);
+  const options = phaseList(period);
+  const auto = phaseOf(period).id;
+  const [phaseId, setPhaseId] = useState<string>(auto);
+  useEffect(() => setPhaseId(options.some((p) => p.id === auto) ? auto : options[0]?.id ?? "w1"), [auto, pm]);
+  const phase = phaseById(period, phaseId);
+  const q = quotaOf(period);
   const [fonnte, setFonnte] = useState<boolean | null>(null);
   const [blasting, setBlasting] = useState(false);
   useEffect(() => {
@@ -35,10 +30,10 @@ export default function Reminders({ period }: { period: RundownPeriod | null }) 
   const active = data.members.filter((m) => m.is_active && m.role === "member");
   const rows = active
     .map((m) => ({ m, pr: progressFor(m.id, data.concepts, data.stories) }))
-    .map((r) => ({ ...r, reason: pendingReason(phase, r.pr) }))
+    .map((r) => ({ ...r, reason: pendingReason(phase, r.pr, q) }))
     .filter((r) => r.reason)
     .sort((a, b) => a.pr.storiesSubmitted - b.pr.storiesSubmitted || a.m.name.localeCompare(b.m.name));
-  const late = phase === "sks" || phase === "w4";
+  const late = isLatePhase(phase, q);
   const ghosts = late ? rows.filter((r) => r.pr.storiesSubmitted === 0 && !flagOf(r.m.id)?.has_kabar) : [];
   const alerts = rows.filter((r) => !ghosts.includes(r));
 
@@ -110,9 +105,9 @@ export default function Reminders({ period }: { period: RundownPeriod | null }) 
       <PhaseBanner period={period} compact />
       <div className="card flex flex-wrap items-end justify-between gap-3 p-4">
         <label className="block">
-          <span className="label">Fase pengingat {phase === auto ? "(otomatis dari rundown)" : "(manual)"}</span>
-          <select className="input w-auto" value={phase} onChange={(e) => setPhase(e.target.value as PhaseKey)}>
-            {PHASES.map((p) => <option key={p.key} value={p.key}>{p.label}{p.key === auto ? " · aktif" : ""}</option>)}
+          <span className="label">Fase pengingat {phaseId === auto ? "(otomatis dari rundown)" : "(manual)"}</span>
+          <select className="input w-auto" value={phaseId} onChange={(e) => setPhaseId(e.target.value)}>
+            {options.map((p) => <option key={p.id} value={p.id}>{p.label}{p.id === auto ? " · aktif" : ""}</option>)}
           </select>
         </label>
         <div className="flex flex-wrap items-center gap-2">
@@ -135,10 +130,10 @@ export default function Reminders({ period }: { period: RundownPeriod | null }) 
       ) : (
         <>
           {alerts.length > 0 && (
-            <div className={`card overflow-hidden ${phase === "sks" ? "ring-2 ring-crimson-500/40" : ""}`}>
-              <div className={`flex items-center gap-2 px-4 py-3 font-display font-bold ${phase === "sks" ? "bg-crimson-grad text-white" : "border-b border-slate-100 text-ink"}`}>
-                {phase === "sks" ? <Siren className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4 text-crimson-600" />}
-                {phase === "sks" ? "RED ALERT · Belum tuntas Story 1–3" : "Belum memenuhi target"} ({alerts.length})
+            <div className={`card overflow-hidden ${phase.key === "sks" ? "ring-2 ring-crimson-500/40" : ""}`}>
+              <div className={`flex items-center gap-2 px-4 py-3 font-display font-bold ${phase.key === "sks" ? "bg-crimson-grad text-white" : "border-b border-slate-100 text-ink"}`}>
+                {phase.key === "sks" ? <Siren className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4 text-crimson-600" />}
+                {phase.key === "sks" ? `RED ALERT · Belum tuntas Story 1–${q}` : "Belum memenuhi target"} ({alerts.length})
               </div>
               <div className="divide-y divide-slate-100">{alerts.map((r) => <Row key={r.m.id} r={r} />)}</div>
             </div>
