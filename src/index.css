@@ -52,7 +52,8 @@
 .scrollbar-thin::-webkit-scrollbar { height: 6px; width: 6px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 9999px; }
 @keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.animate-fade-up { animation: fade-up .35s ease both; }
+/* fill "backwards": setelah animasi selesai tidak tersisa transform (agar elemen fixed di dalamnya tetap menempel ke layar) */
+.animate-fade-up { animation: fade-up .35s ease backwards; }
 
 /* ===== Kenyamanan scroll & HP ===== */
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
