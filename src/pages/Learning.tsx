@@ -1,13 +1,90 @@
-import { BookOpen, ExternalLink, Sparkles, Target, Wand2 } from "lucide-react";
+import { BookOpen, ExternalLink, Play, Search, Sparkles, Target, Wand2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { Empty, Markdown, Modal, PageLoader, SectionTitle, Spinner, useToast } from "../components/ui";
 import { must, useLive } from "../lib/hooks";
 import { fmtDate, fmtDateTime } from "../lib/rundown";
 import { supabase } from "../lib/supabase";
-import type { GenerationRun, LearningMaterial } from "../lib/types";
+import type { GenerationRun, LearningMaterial, YoutubeVideo } from "../lib/types";
 
 const levelCls: Record<string, string> = { Easy: "badge-green", Intermediate: "badge-amber", Advanced: "badge-red" };
+
+const ytQuery = (m: LearningMaterial) => m.youtube_query || `tutorial ${m.design_app} ${m.title}`;
+const ytSearchUrl = (m: LearningMaterial) => `https://www.youtube.com/results?search_query=${encodeURIComponent(ytQuery(m))}`;
+
+/** Video tutorial YouTube untuk satu materi: pemutar ringan (iframe baru dimuat saat diketuk) + tombol cari. */
+function VideoSection({ m }: { m: LearningMaterial }) {
+  const videos: YoutubeVideo[] = Array.isArray(m.videos) ? m.videos : [];
+  const [active, setActive] = useState<YoutubeVideo | null>(videos[0] ?? null);
+  const [playing, setPlaying] = useState(false);
+
+  const searchBtn = (
+    <a href={ytSearchUrl(m)} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">
+      <Search className="h-3.5 w-3.5" /> Cari di YouTube
+    </a>
+  );
+
+  if (!active) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-ink"><Play className="h-4 w-4 fill-crimson-600 text-crimson-600" /> Video tutorial</p>
+          <p className="truncate text-xs text-ink-muted">Kata kunci: “{ytQuery(m)}”</p>
+        </div>
+        {searchBtn}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2.5">
+      <p className="label flex items-center gap-1.5"><Play className="h-3.5 w-3.5 fill-crimson-600 text-crimson-600" /> Video tutorial</p>
+      <div className="relative aspect-video overflow-hidden rounded-xl bg-black">
+        {playing ? (
+          <iframe
+            key={active.id}
+            className="absolute inset-0 h-full w-full"
+            src={`https://www.youtube-nocookie.com/embed/${active.id}?autoplay=1&rel=0&modestbranding=1&playsinline=1`}
+            title={active.title}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allowFullScreen
+          />
+        ) : (
+          <button onClick={() => setPlaying(true)} className="group absolute inset-0 h-full w-full" aria-label={`Putar video: ${active.title}`}>
+            <img src={`https://i.ytimg.com/vi/${active.id}/hqdefault.jpg`} alt="" loading="lazy" className="h-full w-full object-cover opacity-90 transition group-hover:opacity-100" />
+            <span className="absolute inset-0 grid place-items-center">
+              <span className="grid h-14 w-14 place-items-center rounded-full bg-crimson-600 shadow-lg transition group-hover:scale-110">
+                <Play className="ml-0.5 h-6 w-6 fill-white text-white" />
+              </span>
+            </span>
+          </button>
+        )}
+      </div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="line-clamp-2 text-sm font-semibold leading-snug text-ink">{active.title}</p>
+          <p className="text-xs text-ink-muted">{active.channel}</p>
+        </div>
+        <a href={`https://www.youtube.com/watch?v=${active.id}`} target="_blank" rel="noreferrer" className="shrink-0 text-ink-muted hover:text-ink" title="Buka di YouTube"><ExternalLink className="h-4 w-4" /></a>
+      </div>
+      {videos.length > 1 && (
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+          {videos.map((v) => (
+            <button key={v.id} onClick={() => { setActive(v); setPlaying(true); }}
+              className={`w-36 shrink-0 text-left ${v.id === active.id ? "" : "opacity-70 hover:opacity-100"}`}>
+              <span className={`relative block aspect-video overflow-hidden rounded-lg bg-slate-200 ${v.id === active.id ? "ring-2 ring-crimson-500" : ""}`}>
+                <img src={v.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover" />
+              </span>
+              <span className="mt-1 line-clamp-2 block text-[11px] font-medium leading-tight text-ink">{v.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex justify-end">{searchBtn}</div>
+    </div>
+  );
+}
 
 export default function Learning() {
   const { isAdmin } = useAuth();
@@ -24,6 +101,7 @@ export default function Learning() {
   const [app, setApp] = useState("");
   const [open, setOpen] = useState<LearningMaterial | null>(null);
   const [busy, setBusy] = useState(false);
+  const [vidBusy, setVidBusy] = useState(false);
 
   const materials = data?.materials ?? [];
   const apps = useMemo(() => [...new Set(materials.map((m) => m.design_app))].sort(), [materials]);
@@ -46,6 +124,20 @@ export default function Learning() {
     if ((res as { started?: boolean })?.started) toast("AI sedang meriset 5 materi baru… hasil muncul otomatis dalam 1–2 menit.", "info");
   };
 
+  const findVideos = async () => {
+    setVidBusy(true);
+    const { data: res, error } = await supabase.functions.invoke("generate-materials", { body: { action: "videos" } });
+    setVidBusy(false);
+    if (error) {
+      let msg = error.message;
+      try { msg = (await (error as { context?: Response }).context?.json())?.error ?? msg; } catch { /* abaikan */ }
+      return toast(msg, "err");
+    }
+    const r = res as { checked: number; filled: number; error?: string | null };
+    if (r.checked === 0) return toast("Semua materi sudah punya video. 👍", "info");
+    toast(`Video ditemukan untuk ${r.filled} dari ${r.checked} materi${r.error ? " — sisanya dilanjutkan otomatis (kuota harian)" : ""}.`);
+  };
+
   const run = data?.lastRun;
   const running = run?.status === "running" && Date.now() - new Date(run.started_at).getTime() < 5 * 60 * 1000;
 
@@ -56,9 +148,14 @@ export default function Learning() {
         title="Learning Hub Desain"
         desc="5 materi baru setiap 2 hari hasil riset AI dari web & Pinterest — lintas Canva, Figma, Photoshop, Illustrator, After Effects, CapCut, PixelLab, dan Alight Motion."
         action={isAdmin && (
-          <button className="btn-primary" onClick={generate} disabled={busy || running}>
-            {busy || running ? <Spinner /> : <Wand2 className="h-4 w-4" />} Generate 5 Materi Riset Baru Sekarang
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-ghost" onClick={findVideos} disabled={vidBusy} title="Cari video YouTube untuk materi yang belum punya video">
+              {vidBusy ? <Spinner /> : <Play className="h-4 w-4" />} Cari video YouTube
+            </button>
+            <button className="btn-primary" onClick={generate} disabled={busy || running}>
+              {busy || running ? <Spinner /> : <Wand2 className="h-4 w-4" />} Generate 5 Materi Riset Baru Sekarang
+            </button>
+          </div>
         )}
       />
 
@@ -87,7 +184,10 @@ export default function Learning() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {items.map((m) => (
               <button key={m.id} onClick={() => setOpen(m)} className="card group flex flex-col p-5 text-left transition hover:-translate-y-0.5 hover:shadow-lift">
-                <div className="mb-3 flex items-center gap-2"><span className={levelCls[m.difficulty_level]}>{m.difficulty_level}</span><span className="badge-slate">{m.design_app}</span></div>
+                <div className="mb-3 flex items-center gap-2">
+                  <span className={levelCls[m.difficulty_level]}>{m.difficulty_level}</span><span className="badge-slate">{m.design_app}</span>
+                  {m.videos?.length > 0 && <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-crimson-700"><Play className="h-3 w-3 fill-current" /> {m.videos.length} video</span>}
+                </div>
                 <h3 className="font-display text-base font-bold leading-snug text-ink group-hover:text-crimson-700">{m.title}</h3>
                 <p className="mt-1.5 line-clamp-3 text-sm text-ink-muted">{m.summary}</p>
                 {m.pinterest_moodboard?.length > 0 && (
@@ -110,7 +210,8 @@ export default function Learning() {
         {open && (
           <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
             <div>
-              <p className="mb-2 text-[15px] font-medium text-ink">{open.summary}</p>
+              <p className="mb-4 text-[15px] font-medium text-ink">{open.summary}</p>
+              <div className="mb-5"><VideoSection key={open.id} m={open} /></div>
               <Markdown>{open.tutorial_markdown}</Markdown>
             </div>
             <div className="space-y-5">

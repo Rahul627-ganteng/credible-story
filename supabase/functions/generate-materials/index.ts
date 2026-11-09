@@ -1,4 +1,4 @@
-// Credible Story — Generator 5 Materi Belajar (riset web + Pinterest)
+// Credible Story — Generator 5 Materi Belajar (riset web + Pinterest + video YouTube)
 // Dipanggil oleh pg_cron (header x-cron-token) setiap 48 jam, atau manual oleh admin (JWT).
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -21,7 +21,11 @@ type Material = {
   tutorial_markdown: string;
   pinterest_moodboard: { title: string; note: string; palette: string[]; pinterest_url: string }[];
   challenge_task: string;
+  youtube_query: string;
+  videos?: Video[];
+  videos_checked_at?: string;
 };
+type Video = { id: string; title: string; channel: string; thumbnail: string };
 
 function buildPrompt(recentTitles: string[], apps: string[]) {
   return `Kamu adalah mentor desain grafis untuk "Credible Story", tim kreator konten story WhatsApp/Instagram (rasio 9:16) bernuansa edukasi Islami & pengembangan diri. Anggotanya beragam: pemula sampai mahir.
@@ -38,10 +42,11 @@ Aturan isi tiap materi:
 - "tutorial_markdown" berisi bagian: "## Kenapa penting?", "## Langkah praktis" (5-8 langkah bernomor, sebut menu/tombol aplikasi yang nyata), "## Do's", "## Don'ts". Contoh ukuran wajib 1080 × 1920 px.
 - "pinterest_moodboard": 3 item. Tiap item: title (kata kunci gaya), note (apa yang perlu diamati — bedah visual singkat), palette (3 kode HEX), pinterest_url = "https://id.pinterest.com/search/pins/?q=" + kata kunci URL-encoded.
 - "challenge_task": satu tantangan desain konkret bertema story edukasi Islami/pengembangan diri, dengan kriteria selesai yang jelas.
+- "youtube_query": kata kunci pencarian YouTube (3-7 kata, boleh campur Indonesia/Inggris) yang PALING mungkin menemukan video tutorial bagus untuk materi ini. Wajib sebut nama aplikasinya, mis. "tutorial canva teks melengkung story instagram".
 - Konten sopan dan sesuai adab; hindari gambar makhluk bernyawa sebagai fokus utama bila memungkinkan.
 
 KELUARKAN HANYA JSON array (tanpa teks lain, tanpa code fence) dengan 5 objek berkunci persis:
-title, design_app, difficulty_level, summary, tutorial_markdown, pinterest_moodboard, challenge_task`;
+title, design_app, difficulty_level, summary, tutorial_markdown, pinterest_moodboard, challenge_task, youtube_query`;
 }
 
 function extractJsonArray(text: string): unknown {
@@ -75,10 +80,56 @@ function validate(items: unknown): Material[] {
           : `https://id.pinterest.com/search/pins/?q=${encodeURIComponent(String(m.title ?? "story design"))}`,
       })),
       challenge_task: String(it.challenge_task ?? ""),
+      videos: [],
+      youtube_query: (String(it.youtube_query ?? "").trim() || `tutorial ${it.design_app ?? ""} ${it.title}`).slice(0, 120),
     });
   }
   if (out.length < 3) throw new Error(`Hanya ${out.length} materi valid dari AI`);
   return out.slice(0, 5);
+}
+
+// ---- YouTube Data API v3 (gratis 10.000 unit/hari; 1 pencarian = 100 unit) ----
+const decodeHtml = (t: string) =>
+  t.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+
+async function searchYouTube(key: string, q: string): Promise<Video[]> {
+  const params = new URLSearchParams({
+    part: "snippet", type: "video", maxResults: "3", q, key,
+    relevanceLanguage: "id", regionCode: "ID", safeSearch: "strict", videoEmbeddable: "true",
+  });
+  const res = await fetch(`https://www.googleapis.com/youtube/v3/search?${params}`);
+  if (!res.ok) throw new Error(`YouTube ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  return (data.items ?? [])
+    .filter((it: { id?: { videoId?: string } }) => it.id?.videoId)
+    .map((it: { id: { videoId: string }; snippet: { title: string; channelTitle: string; thumbnails?: Record<string, { url: string }> } }) => ({
+      id: it.id.videoId,
+      title: decodeHtml(it.snippet.title),
+      channel: decodeHtml(it.snippet.channelTitle),
+      thumbnail: it.snippet.thumbnails?.medium?.url ?? it.snippet.thumbnails?.default?.url ?? `https://i.ytimg.com/vi/${it.id.videoId}/mqdefault.jpg`,
+    }));
+}
+
+/** Isi video untuk materi yang belum dicek (atau semua bila force). Berhenti bila kuota habis. */
+// deno-lint-ignore no-explicit-any
+async function backfillVideos(admin: any, ytKey: string, opts: { force?: boolean; limit?: number } = {}) {
+  let q = admin.from("learning_materials").select("id,title,design_app,youtube_query").order("created_at", { ascending: false }).limit(opts.limit ?? 20);
+  if (!opts.force) q = q.is("videos_checked_at", null);
+  const { data: rows } = await q;
+  let filled = 0;
+  let error: string | null = null;
+  for (const r of rows ?? []) {
+    const query = r.youtube_query || `tutorial ${r.design_app} ${r.title}`;
+    try {
+      const videos = await searchYouTube(ytKey, query);
+      await admin.from("learning_materials").update({ videos, youtube_query: query, videos_checked_at: new Date().toISOString() }).eq("id", r.id);
+      if (videos.length) filled++;
+    } catch (e) {
+      error = (e as Error).message;
+      break; // kemungkinan kuota harian habis — lanjut otomatis di jadwal berikutnya
+    }
+  }
+  return { checked: rows?.length ?? 0, filled, error };
 }
 
 async function geminiOnce(key: string, model: string, prompt: string, withSearch: boolean) {
@@ -169,6 +220,20 @@ Deno.serve(async (req) => {
 
   const geminiKey = Deno.env.get("GEMINI_API_KEY");
   const claudeKey = Deno.env.get("ANTHROPIC_API_KEY");
+  const ytKey = Deno.env.get("YOUTUBE_API_KEY");
+  const body = await req.json().catch(() => ({})) as { action?: string; force?: boolean };
+
+  // Admin: cari ulang video YouTube untuk materi
+  if (body.action === "videos") {
+    if (!ytKey) return json({ error: "Secret YOUTUBE_API_KEY belum diatur di Supabase › Edge Functions › Secrets. Sementara ini tombol \"Cari di YouTube\" tetap bisa dipakai." }, 400);
+    const r = await backfillVideos(admin, ytKey, { force: !!body.force, limit: body.force ? 40 : 20 });
+    if (r.error && r.filled === 0) return json({ error: r.error }, 502);
+    return json(r);
+  }
+
+  // Cron: lengkapi video materi lama yang belum dicek (mis. setelah API key baru ditambahkan)
+  // @ts-ignore EdgeRuntime tersedia di Supabase Edge Runtime
+  if (trigger === "cron" && ytKey) EdgeRuntime.waitUntil(backfillVideos(admin, ytKey, { limit: 10 }));
 
   // Cron: lewati bila batch terakhir < 40 jam
   if (trigger === "cron") {
@@ -201,9 +266,17 @@ Deno.serve(async (req) => {
       const prompt = buildPrompt((recent ?? []).map((r) => r.title), shuffled);
       const result = geminiKey ? await callGemini(geminiKey, prompt) : await callClaude(claudeKey!, prompt);
       const items = validate(extractJsonArray(result.text));
+      if (ytKey) {
+        for (const it of items) {
+          try {
+            it.videos = await searchYouTube(ytKey, it.youtube_query);
+            it.videos_checked_at = new Date().toISOString();
+          } catch { break; } // kuota habis → dilengkapi otomatis saat cron berikutnya
+        }
+      }
       const batchDate = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
       const { error } = await admin.from("learning_materials").insert(items.map((it) => ({
-        ...it, batch_date: batchDate, sources: result.sources, generated_by: result.engine,
+        ...it, videos_checked_at: it.videos_checked_at ?? null, batch_date: batchDate, sources: result.sources, generated_by: result.engine,
       })));
       if (error) throw error;
       await admin.from("learning_generation_runs").update({

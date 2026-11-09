@@ -162,7 +162,12 @@ export interface LearningMaterial {
   sources: { title: string; url: string }[];
   generated_by: string;
   created_at: string;
+  youtube_query: string | null;
+  videos: YoutubeVideo[];
+  videos_checked_at: string | null;
 }
+
+export interface YoutubeVideo { id: string; title: string; channel: string; thumbnail: string }
 
 export interface GenerationRun {
   id: string;
