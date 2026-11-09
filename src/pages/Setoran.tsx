@@ -1,6 +1,5 @@
 import { CheckCircle2, ExternalLink, FolderOpen, ImagePlus, Link2, Lock, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { PhaseBanner } from "../components/Rundown";
 import { SpecialTasks } from "../components/SpecialTasks";
@@ -9,7 +8,7 @@ import { activePeriodOf, must, previewUrl, useLive, usePeriods } from "../lib/ho
 import { deadlinesOf, fmtDate, monthLabel, progressEmoji, quotaOf, storyNums } from "../lib/rundown";
 import { compressStory } from "../lib/image";
 import { errMsg, supabase } from "../lib/supabase";
-import { DESIGN_APPS, type Concept, type Member, type Story } from "../lib/types";
+import { DESIGN_APPS, type Member, type Story } from "../lib/types";
 
 const MAX_MB = 40; // file mentah; dikompres otomatis ke < 1 MB sebelum diunggah
 
@@ -32,13 +31,12 @@ export default function Setoran() {
     !isAdmin ? member : roster?.find((m) => m.id === targetId) ?? null;
 
   const { data, loading, reload } = useLive(async () => {
-    if (!target || !pm) return { concepts: [] as Concept[], stories: [] as Story[] };
-    const [c, s] = await Promise.all([
-      supabase.from("concept_submissions").select("*").eq("member_id", target.id).eq("period_month", pm),
+    if (!target || !pm) return { stories: [] as Story[] };
+    const [s] = await Promise.all([
       supabase.from("story_submissions").select("*").eq("member_id", target.id).eq("period_month", pm).eq("is_archive", false).is("special_id", null).order("story_target"),
     ]);
-    return { concepts: must(c) as Concept[], stories: must(s) as Story[] };
-  }, [target?.id, pm], ["concept_submissions", "story_submissions"]);
+    return { stories: must(s) as Story[] };
+  }, [target?.id, pm], ["story_submissions"]);
 
   const [storyN, setStoryN] = useState<number>(1);
   const q = quotaOf(period);
@@ -50,11 +48,11 @@ export default function Setoran() {
   const [busy, setBusy] = useState(false);
   const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
 
-  const concepts = data?.concepts ?? [];
   const stories = data?.stories ?? [];
-  const concept = concepts.find((c) => c.story_number === storyN);
   const existing = stories.find((s) => s.story_target === storyN);
-  const canSubmit = !!period && !period.is_locked && (isAdmin || concept?.status === "acc") && existing?.qc_status !== "acc";
+  const canSubmit = !!period && !period.is_locked && existing?.qc_status !== "acc";
+  const [title, setTitle] = useState("");
+  useEffect(() => setTitle(existing?.title ?? ""), [existing?.id, storyN, target?.id]);
 
   useEffect(() => {
     // pilih otomatis story pertama yang belum disetor
@@ -87,7 +85,7 @@ export default function Setoran() {
       }
       const { error } = await supabase.from("story_submissions").upsert({
         member_id: target.id, period_month: period.period_month, story_target: storyN,
-        submission_mode: mode, file_url: url, design_app: app, title: concept?.title ?? null,
+        submission_mode: mode, file_url: url, design_app: app, title: title.trim() || null,
         ...(isAdmin ? {} : { qc_status: "pending_qc" }),
       }, { onConflict: "member_id,period_month,story_target" });
       if (error) throw error;
@@ -115,7 +113,7 @@ export default function Setoran() {
       <SectionTitle
         eyebrow={`Target ${q} story · ${period ? monthLabel(period.period_month) : ""}`}
         title="Portal Setoran Story"
-        desc="Pilih target story — judul konsep yang sudah di-ACC muncul otomatis. Unggah gambar (dikompres otomatis) atau tempel link Google Drive/Canva."
+        desc="Pilih target story, tulis judulnya, lalu unggah gambar (dikompres otomatis) atau tempel link Google Drive/Canva."
         action={
           <select className="input w-auto" value={pm} onChange={(e) => setPm(e.target.value)} aria-label="Periode">
             {(periods ?? []).map((p) => <option key={p.id} value={p.period_month}>{p.emoji} {monthLabel(p.period_month)}{p.is_locked ? " (terkunci)" : ""}</option>)}
@@ -163,17 +161,9 @@ export default function Setoran() {
                 </div>
               </div>
 
-              <div className={`rounded-xl border px-4 py-3 ${concept?.status === "acc" ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Judul Konsep Taqdim</p>
-                {concept ? (
-                  <>
-                    <p className="font-display font-bold text-ink">{concept.title}</p>
-                    {concept.status !== "acc" && <p className="mt-0.5 text-xs text-amber-900">Konsep ini {concept.status === "revision" ? "masih perlu revisi" : "belum di-ACC"} — setoran dibuka setelah ACC.</p>}
-                  </>
-                ) : (
-                  <p className="text-sm text-amber-900">Belum ada konsep Story {storyN}. <Link to="/app/taqdim" className="font-semibold underline">Ajukan Taqdim dulu</Link>.</p>
-                )}
-              </div>
+              <Field label={`Judul Story ${storyN}`} hint="Sesuai konsep yang sudah kamu taqdimkan ke admin lewat WhatsApp.">
+                <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="mis. Adab Bertanya kepada Guru" disabled={!canSubmit} />
+              </Field>
 
               {existing && (
                 <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3">
@@ -217,7 +207,7 @@ export default function Setoran() {
                 </>
               ) : (
                 <p className="flex items-center gap-1.5 text-sm text-ink-muted"><Lock className="h-4 w-4" />
-                  {period?.is_locked ? "Periode ini sudah dikunci." : existing?.qc_status === "acc" ? "Story ini sudah lolos QC." : "Setoran terbuka setelah konsep di-ACC admin."}
+                  {period?.is_locked ? "Periode ini sudah dikunci." : "Story ini sudah lolos QC."}
                 </p>
               )}
             </>

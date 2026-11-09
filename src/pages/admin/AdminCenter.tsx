@@ -6,7 +6,7 @@ import { monthLabel } from "../../lib/rundown";
 import Overview from "./Overview";
 import Members from "./Members";
 import Applications from "./Applications";
-import ConceptReview from "./ConceptReview";
+import TaqdimChecklist from "./TaqdimChecklist";
 import QcReview from "./QcReview";
 import Reminders from "./Reminders";
 import RundownSettings from "./RundownSettings";
@@ -19,7 +19,7 @@ const tabs = [
   { to: "/admin", label: "Ringkasan", end: true },
   { to: "/admin/member", label: "Member" },
   { to: "/admin/pendaftar", label: "Pendaftar" },
-  { to: "/admin/taqdim", label: "Validasi Taqdim" },
+  { to: "/admin/taqdim", label: "Ceklis Taqdim" },
   { to: "/admin/qc", label: "QC Setoran" },
   { to: "/admin/publikasi", label: "Batch & Publikasi" },
   { to: "/admin/special", label: "Special Edition" },
@@ -70,7 +70,7 @@ export default function AdminCenter() {
         <Route index element={<Overview period={period} />} />
         <Route path="member" element={<Members period={period} />} />
         <Route path="pendaftar" element={<Applications />} />
-        <Route path="taqdim" element={<ConceptReview period={period} />} />
+        <Route path="taqdim" element={<TaqdimChecklist period={period} />} />
         <Route path="qc" element={<QcReview period={period} />} />
         <Route path="publikasi" element={<Publish period={period} />} />
         <Route path="special" element={<Specials />} />

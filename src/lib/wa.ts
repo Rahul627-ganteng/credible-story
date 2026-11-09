@@ -26,9 +26,9 @@ export function reminderMessage(ph: PhaseInfo, name: string, period: RundownPeri
   const dls = deadlinesOf(period);
   switch (ph.key) {
     case "w1":
-      return `Assalamu'alaikum ${name} 👋\n\nPengingat Rundown *${bln}* — saat ini masa *Taqdim Konsep*.\nYuk ajukan draf *${q} konsep story* (judul, ringkasan materi, poin visual) di portal sebelum *${period ? fmtDate(period.w1_end) : "tenggat"}*, supaya bisa dicek admin sebelum mulai desain.\n${reason ? `\nStatus kamu: ${reason}\n` : ""}\n🔗 ${link}/app/taqdim\n\nJazakallahu khairan 🙏`;
+      return `Assalamu'alaikum ${name} 👋\n\nPengingat Rundown *${bln}* — saat ini masa *Taqdim Konsep*.\nYuk kirim *taqdim ${q} konsep story* kamu ke admin lewat WhatsApp sebelum *${period ? fmtDate(period.w1_end) : "tenggat"}* (judul/topik, ringkasan, dan gambaran visual), supaya bisa dicek sebelum mulai desain.\n${reason ? `\nStatus kamu: ${reason}\n` : ""}\nJazakallahu khairan 🙏`;
     case "w1_rev":
-      return `Assalamu'alaikum ${name} 👋\n\nHari ini *tenggat revisi & finalisasi Taqdim* Rundown *${bln}*.\n${reason ? `Status kamu: *${reason}*.\n` : ""}Mohon segera lengkapi/revisi konsep di portal agar topiknya segar dan tidak sama dengan arsip yang sudah terbit. Kalau bingung cari angle baru, kabari admin ya.\n\n🔗 ${link}/app/taqdim\n\nJazakallahu khairan 🙏`;
+      return `Assalamu'alaikum ${name} 👋\n\nMasa *Taqdim Konsep* Rundown *${bln}* berakhir *${period ? fmtDate(period.w1_end) : "segera"}*.\n${reason ? `Status kamu: *${reason}*.\n` : ""}Mohon segera kirim taqdim ${q} konsep story kamu ke admin lewat WhatsApp ya. Kalau bingung cari topik, kabari admin 🙂\n\nJazakallahu khairan 🙏`;
     case "story": {
       const n = ph.storyN ?? 1;
       const last = n >= q;
@@ -63,6 +63,8 @@ export function terminationNotice(name: string): string {
 
 export interface RecapRow {
   member: Pick<Member, "id" | "name" | "category">;
+  /** emoji pilihan member; bila kosong memakai emoji default rekap */
+  emoji?: string | null;
   /** jumlah story reguler */
   count: number;
   /** jumlah Special Edition (dihitung SPECIAL_WEIGHT) */
@@ -89,7 +91,8 @@ export function buildRecap(opts: {
   const byCat = (c: Category) => rows.filter((r) => r.member.category === c && recapTotal(r) > 0)
     .sort((a, b) => a.member.name.localeCompare(b.member.name, "id"));
   const line = (r: RecapRow, i: number) => {
-    const reg = emoji.repeat(Math.min(r.count, quota)) + (r.count > quota ? ` (+${r.count - quota})` : "");
+    const e = r.emoji || emoji;
+    const reg = e.repeat(Math.min(r.count, quota)) + (r.count > quota ? ` (+${r.count - quota})` : "");
     const sp = r.specials ? ` ${SP.repeat(SPECIAL_WEIGHT * r.specials)}` : "";
     return `${i + 1}. ${r.member.name} ${reg}${sp}${r.specials ? ` = ${recapTotal(r)}` : ""}`;
   };
@@ -111,7 +114,10 @@ export function buildRecap(opts: {
   }
   out += `📊 Total: *${total} story* dari *${contributors}/${rows.length}* anggota aktif\n`;
   if (specialCount) out += `   (${regular} reguler + ${specialCount} Special Edition × ${SPECIAL_WEIGHT})\n`;
-  out += `${emoji} = 1 story tersetor · Target ${quota} story/bulan\n`;
+  const personal = rows.some((r) => r.emoji && r.emoji !== emoji);
+  out += personal
+    ? `1 emoji = 1 story tersetor (emoji pilihan masing-masing) · Target ${quota} story/bulan\n`
+    : `${emoji} = 1 story tersetor · Target ${quota} story/bulan\n`;
   if (specialCount || specials.length) out += `${SP.repeat(SPECIAL_WEIGHT)} = 1 Special Edition (dihitung ${SPECIAL_WEIGHT} story)\n`;
   if (showZeroWarning && zero.length) {
     if (zeroExcuse.length) out += `\n📝 *Berhalangan (ada keterangan):*\n${zeroExcuse.map((r) => `- ${r.member.name} (${r.excuse})`).join("\n")}\n`;

@@ -6,8 +6,9 @@ import { activePeriodOf, must, useLive, usePeriods } from "../lib/hooks";
 import { emojiFor, monthLabel, quotaOf } from "../lib/rundown";
 import { supabase } from "../lib/supabase";
 import { specialStatus } from "../lib/special";
-import { SPECIAL_WEIGHT, type Member, type PeriodFlag, type SpecialEdition, type Story } from "../lib/types";
+import { SPECIAL_WEIGHT, type Member, type MemberEmoji, type PeriodFlag, type SpecialEdition, type Story } from "../lib/types";
 import { buildRecap } from "../lib/wa";
+import { emojiMapFor } from "../lib/emoji";
 
 export default function Rekap() {
   const { isAdmin } = useAuth();
@@ -18,21 +19,23 @@ export default function Rekap() {
 
   const { data, loading } = useLive(async () => {
     if (!pm) return null;
-    const [m, s, f, st, sp] = await Promise.all([
+    const [m, s, f, st, sp, em] = await Promise.all([
       supabase.from("members").select("id,name,category,role,is_active").eq("is_active", true).eq("role", "member"),
       supabase.from("story_submissions").select("*").eq("period_month", pm).eq("is_archive", false),
       isAdmin ? supabase.from("member_period_flags").select("*").eq("period_month", pm) : Promise.resolve({ data: [], error: null }),
       isAdmin ? supabase.from("app_settings").select("key,value").eq("key", "recap_footer") : Promise.resolve({ data: [], error: null }),
       supabase.from("special_editions").select("*").eq("period_month", pm).order("publish_date"),
+      supabase.from("member_emojis").select("*").lte("period_month", pm),
     ]);
     return {
       members: must(m) as Pick<Member, "id" | "name" | "category">[],
       stories: must(s) as Story[],
       specials: must(sp) as SpecialEdition[],
+      emojis: must(em) as MemberEmoji[],
       flags: must(f) as PeriodFlag[],
       footer: ((must(st) as { value: string }[])[0]?.value) ?? "",
     };
-  }, [pm, isAdmin], ["story_submissions", "members", "member_period_flags", "special_editions"]);
+  }, [pm, isAdmin], ["story_submissions", "members", "member_period_flags", "special_editions", "member_emojis"]);
 
   const [onlyAcc, setOnlyAcc] = useState(false);
   const [warn, setWarn] = useState(true);
@@ -43,8 +46,10 @@ export default function Rekap() {
   const text = useMemo(() => {
     if (!data || !pm) return "";
     const counted = data.stories.filter((s) => !onlyAcc || s.qc_status === "acc");
+    const personal = emojiMapFor(data.emojis, pm);
     const rows = data.members.map((m) => ({
       member: m,
+      emoji: personal.get(m.id)?.emoji ?? null,
       count: counted.filter((s) => s.member_id === m.id && !s.special_id).length,
       specials: counted.filter((s) => s.member_id === m.id && s.special_id).length,
       excuse: data.flags.find((f) => f.member_id === m.id)?.excuse_note ?? null,
@@ -69,15 +74,16 @@ export default function Rekap() {
         } />
       <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
         <div className="card h-fit space-y-4 p-5">
-          <label className="block"><span className="label">Emoji bulan</span>
+          <label className="block"><span className="label">Emoji default</span>
             <input className="input text-center text-xl" value={emoji} onChange={(e) => setEmoji(e.target.value)} maxLength={4} />
+            <span className="mt-1 block text-xs text-ink-muted">Dipakai untuk anggota yang belum memilih emoji sendiri di dashboard-nya.</span>
           </label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={onlyAcc} onChange={(e) => setOnlyAcc(e.target.checked)} /> Hitung yang lolos QC saja</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={warn} onChange={(e) => setWarn(e.target.checked)} /> Peringatan 0 setoran</label>
           {isAdmin && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={footerOn} onChange={(e) => setFooterOn(e.target.checked)} /> Kalimat penutup</label>}
           {data && (
             <div className="rounded-xl bg-slate-50 p-3 text-xs text-ink-muted">
-              <p><b className="text-ink">{data.members.length}</b> anggota aktif</p>
+              <p><b className="text-ink">{data.members.length}</b> anggota aktif · <b className="text-ink">{data.members.filter((m) => emojiMapFor(data.emojis, pm).has(m.id)).length}</b> memilih emoji sendiri</p>
               <p><b className="text-ink">{data.stories.filter((s) => !s.special_id).length}</b> setoran reguler ({data.stories.filter((s) => !s.special_id && s.qc_status === "acc").length} lolos QC)</p>
               {data.specials.length > 0 && <p><b className="text-ink">{data.stories.filter((s) => s.special_id).length}/{data.specials.length}</b> Special Edition terkirim (×{SPECIAL_WEIGHT})</p>}
             </div>

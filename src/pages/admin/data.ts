@@ -1,11 +1,10 @@
 import { must, useLive } from "../../lib/hooks";
 import { supabase } from "../../lib/supabase";
-import type { Concept, Member, PeriodFlag, Story } from "../../lib/types";
+import type { Member, PeriodFlag, Story } from "../../lib/types";
 
 export interface AdminData {
   members: Member[];
   phones: Record<string, string | null>;
-  concepts: Concept[];
   stories: Story[];
   flags: PeriodFlag[];
 }
@@ -13,10 +12,9 @@ export interface AdminData {
 /** Data gabungan untuk admin pada satu periode, ter-update real-time */
 export function useAdminData(pm: string) {
   return useLive<AdminData>(async () => {
-    const [m, c, cs, st, f] = await Promise.all([
+    const [m, c, st, f] = await Promise.all([
       supabase.from("members").select("*").order("name"),
       supabase.from("member_contacts").select("member_id,phone_number"),
-      pm ? supabase.from("concept_submissions").select("*").eq("period_month", pm) : Promise.resolve({ data: [], error: null }),
       pm ? supabase.from("story_submissions").select("*").eq("period_month", pm).eq("is_archive", false) : Promise.resolve({ data: [], error: null }),
       pm ? supabase.from("member_period_flags").select("*").eq("period_month", pm) : Promise.resolve({ data: [], error: null }),
     ]);
@@ -25,11 +23,10 @@ export function useAdminData(pm: string) {
     return {
       members: must(m) as Member[],
       phones,
-      concepts: must(cs) as Concept[],
       stories: must(st) as Story[],
       flags: must(f) as PeriodFlag[],
     };
-  }, [pm], ["members", "concept_submissions", "story_submissions", "member_period_flags"]);
+  }, [pm], ["members", "story_submissions", "member_period_flags"]);
 }
 
 export async function upsertFlag(memberId: string, pm: string, patch: Partial<PeriodFlag>) {

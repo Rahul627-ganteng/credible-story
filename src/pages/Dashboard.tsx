@@ -1,13 +1,14 @@
-import { ArrowRight, BookOpen, ClipboardList, FolderOpen, NotebookPen, Phone, Upload } from "lucide-react";
+import { ArrowRight, BookOpen, CheckCircle2, Clock, FolderOpen, NotebookPen, Phone, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { PhaseBanner } from "../components/Rundown";
-import { ConceptBadge, Markdown, PageLoader, ProgressBar, QcBadge, Spinner, useToast } from "../components/ui";
+import { EmojiPicker } from "../components/EmojiPicker";
+import { Markdown, PageLoader, ProgressBar, QcBadge, Spinner, useToast } from "../components/ui";
 import { activePeriodOf, must, useLive, usePeriods } from "../lib/hooks";
-import { fmtDateTime, monthLabel, phaseOf, progressEmoji, quotaOf, storyNums } from "../lib/rundown";
+import { fmtDate, fmtDateTime, monthLabel, phaseOf, progressEmoji, quotaOf, storyNums } from "../lib/rundown";
 import { errMsg, supabase } from "../lib/supabase";
-import type { Concept, LearningMaterial, Story } from "../lib/types";
+import type { LearningMaterial, PeriodFlag, Story } from "../lib/types";
 import { normalizePhone } from "../lib/wa";
 import { SpecialTasks } from "../components/SpecialTasks";
 
@@ -19,17 +20,17 @@ export default function Dashboard() {
   const lastEval = periods?.find((p) => p.monthly_evaluation_notes && p.evaluation_published_at);
 
   const { data, loading } = useLive(async () => {
-    if (!member || !pm) return { concepts: [] as Concept[], stories: [] as Story[], materials: [] as LearningMaterial[] };
-    const [c, s, m] = await Promise.all([
-      supabase.from("concept_submissions").select("*").eq("member_id", member.id).eq("period_month", pm),
+    if (!member || !pm) return { flag: null as PeriodFlag | null, stories: [] as Story[], materials: [] as LearningMaterial[] };
+    const [f, s, m] = await Promise.all([
+      supabase.from("member_period_flags").select("*").eq("member_id", member.id).eq("period_month", pm).maybeSingle(),
       supabase.from("story_submissions").select("*").eq("member_id", member.id).eq("period_month", pm).eq("is_archive", false).is("special_id", null),
       supabase.from("learning_materials").select("id,title,design_app,difficulty_level,batch_date").order("created_at", { ascending: false }).limit(3),
     ]);
-    return { concepts: must(c) as Concept[], stories: must(s) as Story[], materials: must(m) as LearningMaterial[] };
-  }, [member?.id, pm], ["concept_submissions", "story_submissions", "learning_materials"]);
+    return { flag: (f.data ?? null) as PeriodFlag | null, stories: must(s) as Story[], materials: must(m) as LearningMaterial[] };
+  }, [member?.id, pm], ["member_period_flags", "story_submissions", "learning_materials"]);
 
   if (lp || loading || !member) return <PageLoader />;
-  const concepts = data?.concepts ?? [];
+  const taqdimDone = !!data?.flag?.taqdim_done;
   const stories = data?.stories ?? [];
   const done = stories.length;
   const ph = phaseOf(period);
@@ -61,28 +62,35 @@ export default function Dashboard() {
             )}
           </div>
           <div className="mt-4"><ProgressBar value={done} max={q} /></div>
+          {period && (
+            <div className={`mt-4 flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm ${taqdimDone ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+              {taqdimDone ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <Clock className="mt-0.5 h-4 w-4 shrink-0" />}
+              <p>{taqdimDone
+                ? <>Taqdim konsep bulan ini <b>sudah diterima admin</b>.</>
+                : <>Taqdim konsep <b>belum ditandai</b>. Kirim {q} konsep story ke admin lewat WhatsApp sebelum <b>{fmtDate(period.w1_end)}</b>.</>}</p>
+            </div>
+          )}
           <div className="mt-5 divide-y divide-slate-100 rounded-xl border border-slate-200">
             {storyNums(q).map((n) => {
-              const c = concepts.find((x) => x.story_number === n);
               const s = stories.find((x) => x.story_target === n);
               return (
                 <div key={n} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Story {n}</p>
-                    <p className="truncate font-medium text-ink">{c?.title ?? <span className="text-ink-muted">Konsep belum diajukan</span>}</p>
+                    <p className="truncate font-medium text-ink">{s?.title || <span className="text-ink-muted">{s ? "Tanpa judul" : "Belum disetor"}</span>}</p>
                   </div>
-                  <div className="flex flex-wrap gap-1.5"><ConceptBadge c={c} /><QcBadge s={s} /></div>
+                  <QcBadge s={s} />
                 </div>
               );
             })}
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Link to="/app/taqdim" className={ph.step === 1 ? "btn-primary" : "btn-ghost"}><ClipboardList className="h-4 w-4" /> Taqdim Konsep</Link>
             <Link to="/app/setoran" className={ph.key === "story" || ph.key === "sks" ? "btn-primary" : "btn-ghost"}><Upload className="h-4 w-4" /> Setor Story</Link>
           </div>
         </div>
 
         <div className="space-y-5">
+          {!isAdmin && <EmojiPicker memberId={member.id} period={period} />}
           {!isAdmin && <SpecialTasks memberId={member.id} compact />}
           <div className="card p-5">
             <p className="label flex items-center gap-1.5"><BookOpen className="h-3.5 w-3.5" /> Materi terbaru</p>

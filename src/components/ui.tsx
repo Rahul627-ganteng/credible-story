@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { copyText } from "../lib/hooks";
-import type { Concept, Story } from "../lib/types";
+import type { Story } from "../lib/types";
 
 /* ---------- Toast ---------- */
 type Toast = { id: number; text: string; tone: "ok" | "err" | "info" };
@@ -161,13 +161,6 @@ export function Stat({ label, value, sub, accent = false }: { label: string; val
 }
 
 /* ---------- Status badges ---------- */
-export function ConceptBadge({ c }: { c?: Concept | null }) {
-  if (!c) return <span className="badge-slate">Belum diajukan</span>;
-  if (c.status === "acc") return <span className="badge-green">✓ ACC</span>;
-  if (c.status === "revision") return <span className="badge-red">Perlu revisi</span>;
-  return <span className="badge-amber">Menunggu review</span>;
-}
-
 export function QcBadge({ s }: { s?: Story | null }) {
   if (!s) return <span className="badge-slate">Belum setor</span>;
   if (s.qc_status === "acc") return <span className="badge-green">✓ Lolos QC{s.is_published_to_showcase ? " · Terbit" : ""}</span>;

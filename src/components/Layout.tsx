@@ -1,5 +1,5 @@
 import {
-  BookOpen, ClipboardCheck, ClipboardList, FileText, GalleryVerticalEnd, LayoutDashboard, LogIn, LogOut, Menu, MessageSquareText,
+  BookOpen, ClipboardCheck, FileText, GalleryVerticalEnd, LayoutDashboard, LogIn, LogOut, Menu, MessageSquareText,
   PackageCheck, ShieldCheck, Star, Upload, UserPlus, X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -137,7 +137,6 @@ export function AppLayout() {
   const loc = useLocation();
   const items: { to: string; label: string; icon: ReactNode; end?: boolean }[] = [
     { to: "/app", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" />, end: true },
-    { to: "/app/taqdim", label: "Taqdim Konsep", icon: <ClipboardList className="h-4 w-4" /> },
     { to: "/app/setoran", label: "Setoran Story", icon: <Upload className="h-4 w-4" /> },
     { to: "/app/belajar", label: "Learning Hub", icon: <BookOpen className="h-4 w-4" /> },
     { to: "/app/rekap", label: "Rekap WA", icon: <MessageSquareText className="h-4 w-4" /> },
@@ -154,9 +153,9 @@ export function AppLayout() {
       ]
     : [
         { to: "/app", label: "Beranda", icon: <LayoutDashboard className="h-5 w-5" />, end: true },
-        { to: "/app/taqdim", label: "Taqdim", icon: <ClipboardList className="h-5 w-5" /> },
         { to: "/app/setoran", label: "Setor", icon: <Upload className="h-5 w-5" /> },
         { to: "/app/belajar", label: "Belajar", icon: <BookOpen className="h-5 w-5" /> },
+        { to: "/app/rekap", label: "Rekap", icon: <MessageSquareText className="h-5 w-5" /> },
       ];
   useEffect(() => setOpen(false), [loc.pathname]);
 

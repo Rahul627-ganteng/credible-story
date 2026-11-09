@@ -99,7 +99,7 @@ export default function Recruitment() {
         </p>
         <ol className="mt-8 space-y-4">
           {[
-            ["Taqdim 4 konsep", "Di awal bulan kamu mengajukan 4 ide story untuk divalidasi admin."],
+            ["Taqdim 4 konsep", "Di awal bulan kamu mengirim 4 ide story ke admin lewat WhatsApp."],
             ["Desain 1 story per minggu", "Empat story 9:16 per bulan, masing-masing dengan tenggat mingguan."],
             ["Belajar bareng", "Akses Learning Hub dengan materi baru setiap 2 hari."],
           ].map(([t, d], i) => (

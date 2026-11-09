@@ -1,4 +1,4 @@
-import type { Concept, RundownPeriod, Story } from "./types";
+import type { RundownPeriod, Story } from "./types";
 
 export const EMOJI_BULAN: Record<number, string> = {
   1: "🎆", 2: "💐", 3: "🌱", 4: "🌷", 5: "🌼", 6: "🌺",
@@ -136,8 +136,8 @@ export function phaseOf(p: RundownPeriod | null | undefined, today = todayJakart
     // Revisi & finalisasi = 2 hari terakhir masa taqdim (Hari 6–7 dari 7; hari terakhir bila taqdim singkat)
     const revStart = span >= 6 ? addDays(p.w1_end, -1) : span >= 2 ? p.w1_end : null;
     if (revStart && today >= revStart)
-      return { ...base, key: "w1_rev", id: "w1_rev", step: 1, title: "Taqdim · Tenggat Revisi & Finalisasi", subtitle: "Selesaikan revisi konsep sebelum masa desain dimulai.", endsOn: p.w1_end, daysLeft: left(p.w1_end), tone: "green" };
-    return { ...base, key: "w1", id: "w1", step: 1, title: `Taqdim ${q} Konsep Story`, subtitle: `Ajukan ${q} konsep (judul, ringkasan, poin visual) untuk divalidasi admin.`, endsOn: p.w1_end, daysLeft: left(p.w1_end), tone: "green" };
+      return { ...base, key: "w1_rev", id: "w1_rev", step: 1, title: "Taqdim · Hari-hari Terakhir", subtitle: "Pastikan taqdim konsep sudah dikirim ke admin lewat WhatsApp sebelum masa desain dimulai.", endsOn: p.w1_end, daysLeft: left(p.w1_end), tone: "green" };
+    return { ...base, key: "w1", id: "w1", step: 1, title: `Taqdim ${q} Konsep Story`, subtitle: `Kirim taqdim ${q} konsep story ke admin lewat WhatsApp.`, endsOn: p.w1_end, daysLeft: left(p.w1_end), tone: "green" };
   }
   const dls = deadlinesOf(p);
   const lastDl = dls[dls.length - 1] ?? p.w4_end;
@@ -153,8 +153,8 @@ export function phaseList(p: RundownPeriod | null | undefined): { id: string; la
   if (!p) return [];
   const dls = deadlinesOf(p);
   return [
-    { id: "w1", label: `Taqdim ${quotaOf(p)} konsep (s/d ${fmtDate(p.w1_end)})` },
-    { id: "w1_rev", label: "Taqdim · revisi & finalisasi" },
+    { id: "w1", label: `Taqdim konsep via WA (s/d ${fmtDate(p.w1_end)})` },
+    { id: "w1_rev", label: "Taqdim · hari-hari terakhir" },
     ...dls.map((d, i) => ({ id: `story:${i + 1}`, label: `Story ${i + 1} (tenggat ${fmtDate(d)})` })),
     { id: "sks", label: `SKS & Desain Bareng${p.sks_start ? ` (mulai ${fmtDate(p.sks_start)})` : ""}` },
   ];
@@ -166,7 +166,7 @@ export function phaseById(p: RundownPeriod | null | undefined, id: string, today
   const q = quotaOf(p);
   const base = { storyN: null, endsOn: null, daysLeft: null } as const;
   if (id === "w1") return { ...base, key: "w1", id, step: 1, title: `Taqdim ${q} Konsep Story`, subtitle: "", endsOn: p.w1_end, tone: "green" };
-  if (id === "w1_rev") return { ...base, key: "w1_rev", id, step: 1, title: "Taqdim · Revisi", subtitle: "", endsOn: p.w1_end, tone: "green" };
+  if (id === "w1_rev") return { ...base, key: "w1_rev", id, step: 1, title: "Taqdim · Hari Terakhir", subtitle: "", endsOn: p.w1_end, tone: "green" };
   if (id === "sks") return { ...base, key: "sks", id, step: 1 + q, title: "Fase SKS", subtitle: "", endsOn: deadlinesOf(p)[q - 1] ?? null, tone: "amber" };
   if (id.startsWith("story:")) return storyPhase(p, Number(id.split(":")[1]), today);
   return cur;
@@ -176,9 +176,8 @@ export function phaseById(p: RundownPeriod | null | undefined, id: string, today
 export const isLatePhase = (ph: PhaseInfo, quota: number) => ph.key === "sks" || ph.key === "done" || (ph.key === "story" && (ph.storyN ?? 0) >= quota);
 
 export interface MemberProgress {
-  conceptsSubmitted: number;
-  conceptsAcc: number;
-  conceptsRevision: number;
+  /** Sudah ditandai admin sudah taqdim konsep (via WA) */
+  taqdimDone: boolean;
   storiesSubmitted: number;
   storiesAcc: number;
   /** Jumlah setoran Special Edition (tidak mengisi slot Story 1..N) */
@@ -189,14 +188,11 @@ export interface MemberProgress {
 /** Setoran reguler = bukan Special Edition */
 export const isRegular = (s: Pick<Story, "special_id">) => !s.special_id;
 
-export function progressFor(memberId: string, concepts: Concept[], stories: Story[]): MemberProgress {
-  const c = concepts.filter((x) => x.member_id === memberId);
+export function progressFor(memberId: string, stories: Story[], taqdimDone = false): MemberProgress {
   const all = stories.filter((x) => x.member_id === memberId);
   const s = all.filter(isRegular);
   return {
-    conceptsSubmitted: c.length,
-    conceptsAcc: c.filter((x) => x.status === "acc").length,
-    conceptsRevision: c.filter((x) => x.status === "revision").length,
+    taqdimDone,
     storiesSubmitted: s.length,
     storiesAcc: s.filter((x) => x.qc_status === "acc").length,
     specials: all.length - s.length,
@@ -204,14 +200,11 @@ export function progressFor(memberId: string, concepts: Concept[], stories: Stor
   };
 }
 
-/** Alasan member belum memenuhi target fase yang sedang berjalan (null = sudah aman) */
 export function pendingReason(ph: PhaseInfo, pr: MemberProgress, quota: number): string | null {
   switch (ph.key) {
     case "w1":
     case "w1_rev":
-      if (pr.conceptsSubmitted < quota) return `Belum taqdim konsep (${pr.conceptsSubmitted}/${quota})`;
-      if (pr.conceptsRevision > 0) return `${pr.conceptsRevision} konsep perlu revisi`;
-      return null;
+      return pr.taqdimDone ? null : "Belum taqdim konsep (via WA)";
     case "story": {
       const upto = ph.storyN ?? 1;
       const miss = storyNums(upto).filter((n) => !pr.has(n));

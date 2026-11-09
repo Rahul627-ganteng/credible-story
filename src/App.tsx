@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { RequireAdmin, RequireMember } from "./auth/Guards";
 import { AppLayout, PublicLayout } from "./components/Layout";
@@ -10,7 +10,6 @@ import Login from "./pages/Login";
 const Recruitment = lazy(() => import("./pages/Recruitment"));
 const ChangePassword = lazy(() => import("./pages/ChangePassword"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
-const Taqdim = lazy(() => import("./pages/Taqdim"));
 const Setoran = lazy(() => import("./pages/Setoran"));
 const Learning = lazy(() => import("./pages/Learning"));
 const Rekap = lazy(() => import("./pages/Rekap"));
@@ -41,7 +40,7 @@ export default function App() {
               <Route path="/ganti-password" element={<RequireMember><ChangePassword /></RequireMember>} />
               <Route element={<RequireMember><AppLayout /></RequireMember>}>
                 <Route path="/app" element={<Dashboard />} />
-                <Route path="/app/taqdim" element={<Taqdim />} />
+                <Route path="/app/taqdim" element={<Navigate to="/app" replace />} />
                 <Route path="/app/setoran" element={<Setoran />} />
                 <Route path="/app/belajar" element={<Learning />} />
                 <Route path="/app/rekap" element={<Rekap />} />

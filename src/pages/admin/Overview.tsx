@@ -25,9 +25,10 @@ export default function Overview({ period }: { period: RundownPeriod | null }) {
   const active = data.members.filter((m) => m.is_active && m.role === "member");
   const ph = phaseOf(period);
   const q = quotaOf(period);
-  const pending = active.filter((m) => pendingReason(ph, progressFor(m.id, data.concepts, data.stories), q));
+  const taqdimOf = (id: string) => !!data.flags.find((f) => f.member_id === id)?.taqdim_done;
+  const pending = active.filter((m) => pendingReason(ph, progressFor(m.id, data.stories, taqdimOf(m.id)), q));
+  const notTaqdim = active.filter((m) => !taqdimOf(m.id)).length;
   const totalStories = data.stories.filter((s) => !s.special_id).length;
-  const conceptsPending = data.concepts.filter((c) => c.status === "pending").length;
   const qcPending = data.stories.filter((s) => s.qc_status === "pending_qc").length;
   const ranking = active.map((m) => ({ m, n: data.stories.filter((s) => s.member_id === m.id && !s.special_id).length })).sort((a, b) => b.n - a.n || a.m.name.localeCompare(b.m.name));
   const target = active.length * q;
@@ -38,7 +39,7 @@ export default function Overview({ period }: { period: RundownPeriod | null }) {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Anggota aktif" value={active.length} sub={`${active.filter((m) => m.category === "Ikhwan").length} Ikhwan · ${active.filter((m) => m.category === "Akhwat").length} Akhwat`} />
         <Stat label="Story tersetor" value={`${totalStories}/${target}`} sub={`${target ? Math.round((totalStories / target) * 100) : 0}% dari target tim`} />
-        <Stat label="Perlu ditinjau" value={conceptsPending + qcPending} sub={`${conceptsPending} taqdim · ${qcPending} QC`} accent={conceptsPending + qcPending > 0} />
+        <Stat label="Sudah taqdim" value={`${active.length - notTaqdim}/${active.length}`} sub={`${qcPending} setoran menunggu QC`} accent={notTaqdim > 0 && ph.step <= 1} />
         <Stat label="Belum memenuhi fase" value={pending.length} sub={ph.key === "pre" || ph.key === "done" ? "—" : "lihat Pengingat WA"} accent={pending.length > 0} />
       </div>
 
@@ -59,7 +60,7 @@ export default function Overview({ period }: { period: RundownPeriod | null }) {
           <div className="card space-y-2 p-5">
             <p className="label">Tindakan cepat</p>
             {[
-              ["/admin/taqdim", `Validasi taqdim (${conceptsPending})`],
+              ["/admin/taqdim", `Ceklis taqdim (${notTaqdim} belum)`],
               ["/admin/qc", `QC setoran (${qcPending})`],
               ["/admin/pendaftar", `Pendaftar baru (${pendingApps ?? 0})`],
               ["/admin/pengingat", `Kirim pengingat (${pending.length})`],

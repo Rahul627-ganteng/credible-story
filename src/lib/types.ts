@@ -134,12 +134,18 @@ export const SPECIAL_WEIGHT = 2;
 export interface PeriodFlag {
   member_id: string;
   period_month: string;
+  /** Taqdim konsep dilakukan via WhatsApp; admin cukup menandai sudah/belum */
+  taqdim_done: boolean;
+  taqdim_marked_at: string | null;
   has_kabar: boolean;
   excuse_note: string | null;
   design_bareng: boolean;
   last_reminded_at: string | null;
   reminder_count: number;
 }
+
+/** Emoji rekap pilihan member untuk satu bulan (terbawa ke bulan berikutnya sampai diganti) */
+export interface MemberEmoji { member_id: string; period_month: string; emoji: string; updated_at: string }
 
 export interface MoodItem { title: string; note: string; palette: string[]; pinterest_url: string }
 

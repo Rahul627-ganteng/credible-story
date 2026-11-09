@@ -12,7 +12,7 @@ export function PhaseBanner({ period, compact = false }: { period: RundownPeriod
   const q = quotaOf(period);
   const dls = deadlinesOf(period);
   const steps = period ? [
-    { step: 1, label: `Taqdim ${q} konsep`, dot: "🟢", range: `${fmtDate(period.w1_start)} – ${fmtDate(period.w1_end)}` },
+    { step: 1, label: `Taqdim konsep (WA)`, dot: "🟢", range: `${fmtDate(period.w1_start)} – ${fmtDate(period.w1_end)}` },
     ...dls.map((d, i) => ({ step: 2 + i, label: `Story ${i + 1} + QC`, dot: DOTS[i % DOTS.length], range: `tenggat ${fmtDate(d)}` })),
   ] : [];
   return (

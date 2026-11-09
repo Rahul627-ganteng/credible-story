@@ -29,7 +29,7 @@ export default function Reminders({ period }: { period: RundownPeriod | null }) 
   const flagOf = (id: string) => data.flags.find((f) => f.member_id === id);
   const active = data.members.filter((m) => m.is_active && m.role === "member");
   const rows = active
-    .map((m) => ({ m, pr: progressFor(m.id, data.concepts, data.stories) }))
+    .map((m) => ({ m, pr: progressFor(m.id, data.stories, !!flagOf(m.id)?.taqdim_done) }))
     .map((r) => ({ ...r, reason: pendingReason(phase, r.pr, q) }))
     .filter((r) => r.reason)
     .sort((a, b) => a.pr.storiesSubmitted - b.pr.storiesSubmitted || a.m.name.localeCompare(b.m.name));
