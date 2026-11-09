@@ -6,20 +6,13 @@ import { useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
-export function Logo({ compact = false }: { compact?: boolean }) {
+export function Logo({ compact = false, light = false }: { compact?: boolean; light?: boolean }) {
   return (
-    <Link to="/" className="flex items-center gap-2.5">
-      <span className="grid h-9 w-9 place-items-center rounded-xl bg-crimson-grad shadow-sm">
-        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round">
-          <rect x="7" y="3" width="10" height="18" rx="2.5" />
-          <path d="M10 9h4M10 12.5h4M10 16h2" />
-        </svg>
-      </span>
-      {!compact && (
-        <span className="leading-tight">
-          <span className="block font-display text-[15px] font-extrabold tracking-tight text-ink">Credible Story</span>
-          <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Platform</span>
-        </span>
+    <Link to="/" className="flex shrink-0 items-center" aria-label="Credible Story — beranda">
+      {compact ? (
+        <img src={light ? "/brand/mark-white.webp" : "/brand/mark-black.webp"} alt="Credible Story" className="h-9 w-auto" />
+      ) : (
+        <img src={light ? "/brand/logo-white.webp" : "/brand/logo-black.webp"} alt="Credible Story" className="h-9 w-auto" width={104} height={36} />
       )}
     </Link>
   );
@@ -76,10 +69,29 @@ export function PublicLayout() {
       <main key={loc.pathname} className="animate-fade-up">
         <Outlet />
       </main>
-      <footer className="mt-16 border-t border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-3 px-4 py-8 text-sm text-ink-muted sm:flex-row sm:items-center">
-          <Logo />
-          <p>Karya kecil yang konsisten, dakwah yang terus mengalir. © {new Date().getFullYear()} Tim Credible Story</p>
+      <footer className="mt-20 bg-ink text-slate-300">
+        <div className="relative overflow-hidden">
+          <div className="absolute inset-0 opacity-50 [background:radial-gradient(circle_at_85%_20%,#991B1B_0,transparent_45%)]" />
+          <div className="relative mx-auto grid max-w-6xl items-center gap-10 px-4 py-14 md:grid-cols-[auto_1fr]">
+            <img src="/brand/marhalah.webp" alt="Logo Marhalah Credible Generation — Gontor Graduate 2023" className="mx-auto h-44 w-auto drop-shadow-2xl md:h-52" loading="lazy" />
+            <div>
+              <img src="/brand/credible-generation.webp" alt="Credible Generation" className="h-auto w-full max-w-md opacity-95 [filter:invert(1)_grayscale(1)_brightness(1.3)]" loading="lazy" />
+              <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-slate-400">
+                Credible Story adalah <span className="font-semibold text-white">Official Story of Credible Generation</span> — angkatan Gontor Graduate 2023 —
+                yang menebar pengingat kebaikan lewat story setiap bulannya.
+              </p>
+              <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
+                <img src="/brand/official-white.webp" alt="Official Story of Credible Generation" className="h-9 w-auto" loading="lazy" />
+                <Link to="/daftar" className="text-sm font-semibold text-crimson-200 hover:text-white">Gabung tim kreator →</Link>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="border-t border-white/10">
+          <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-5 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+            <p className="font-display font-semibold tracking-wide text-slate-300">CREDIBLE STORY · SEBARKAN KEBAIKANMU HARI INI!</p>
+            <p>© {new Date().getFullYear()} Tim Credible Story</p>
+          </div>
         </div>
       </footer>
     </div>

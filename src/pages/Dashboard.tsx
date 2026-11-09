@@ -21,7 +21,7 @@ export default function Dashboard() {
     if (!member || !pm) return { concepts: [] as Concept[], stories: [] as Story[], materials: [] as LearningMaterial[] };
     const [c, s, m] = await Promise.all([
       supabase.from("concept_submissions").select("*").eq("member_id", member.id).eq("period_month", pm),
-      supabase.from("story_submissions").select("*").eq("member_id", member.id).eq("period_month", pm),
+      supabase.from("story_submissions").select("*").eq("member_id", member.id).eq("period_month", pm).eq("is_archive", false),
       supabase.from("learning_materials").select("id,title,design_app,difficulty_level,batch_date").order("created_at", { ascending: false }).limit(3),
     ]);
     return { concepts: must(c) as Concept[], stories: must(s) as Story[], materials: must(m) as LearningMaterial[] };

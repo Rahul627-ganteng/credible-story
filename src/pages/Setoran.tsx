@@ -6,10 +6,11 @@ import { PhaseBanner } from "../components/Rundown";
 import { Field, PageLoader, ProgressBar, QcBadge, SectionTitle, Spinner, useToast } from "../components/ui";
 import { activePeriodOf, must, previewUrl, useLive, usePeriods } from "../lib/hooks";
 import { monthLabel, progressEmoji } from "../lib/rundown";
+import { compressStory } from "../lib/image";
 import { errMsg, supabase } from "../lib/supabase";
 import { DESIGN_APPS, type Concept, type Member, type Story } from "../lib/types";
 
-const MAX_MB = 10;
+const MAX_MB = 40; // file mentah; dikompres otomatis ke < 1 MB sebelum diunggah
 
 export default function Setoran() {
   const { member, isAdmin } = useAuth();
@@ -33,7 +34,7 @@ export default function Setoran() {
     if (!target || !pm) return { concepts: [] as Concept[], stories: [] as Story[] };
     const [c, s] = await Promise.all([
       supabase.from("concept_submissions").select("*").eq("member_id", target.id).eq("period_month", pm),
-      supabase.from("story_submissions").select("*").eq("member_id", target.id).eq("period_month", pm).order("story_target"),
+      supabase.from("story_submissions").select("*").eq("member_id", target.id).eq("period_month", pm).eq("is_archive", false).order("story_target"),
     ]);
     return { concepts: must(c) as Concept[], stories: must(s) as Story[] };
   }, [target?.id, pm], ["concept_submissions", "story_submissions"]);
@@ -72,9 +73,10 @@ export default function Setoran() {
       let url = link.trim();
       if (mode === "file") {
         if (!file) throw new Error("Pilih file gambar story terlebih dulu.");
-        const ext = file.name.split(".").pop()?.toLowerCase() || "png";
+        const up = await compressStory(file);
+        const ext = up.name.split(".").pop()?.toLowerCase() || "png";
         const path = `${member.id}/${period.period_month}/${target.id}-story${storyN}-${Date.now()}.${ext}`;
-        const { error } = await supabase.storage.from("stories").upload(path, file, { contentType: file.type, cacheControl: "31536000" });
+        const { error } = await supabase.storage.from("stories").upload(path, up, { contentType: up.type, cacheControl: "31536000" });
         if (error) throw error;
         url = supabase.storage.from("stories").getPublicUrl(path).data.publicUrl;
       } else if (!/^https:\/\/(drive\.google\.com|docs\.google\.com|www\.canva\.com|canva\.link|[\w.-]+)\//.test(url)) {
@@ -110,7 +112,7 @@ export default function Setoran() {
       <SectionTitle
         eyebrow="Minggu 2 – 4"
         title="Portal Setoran Story"
-        desc="Pilih target story — judul konsep yang sudah di-ACC muncul otomatis. Unggah gambar (< 10 MB) atau tempel link Google Drive/Canva."
+        desc="Pilih target story — judul konsep yang sudah di-ACC muncul otomatis. Unggah gambar (dikompres otomatis) atau tempel link Google Drive/Canva."
         action={
           <select className="input w-auto" value={pm} onChange={(e) => setPm(e.target.value)} aria-label="Periode">
             {(periods ?? []).map((p) => <option key={p.id} value={p.period_month}>{p.emoji} {monthLabel(p.period_month)}{p.is_locked ? " (terkunci)" : ""}</option>)}
@@ -192,7 +194,7 @@ export default function Setoran() {
                       </div>
                       <div className="text-sm">
                         <p className="font-semibold text-ink">{file ? file.name : "Klik atau seret gambar story ke sini"}</p>
-                        <p className="text-ink-muted">{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : `PNG/JPG/WEBP, rasio 9:16, < ${MAX_MB} MB`}</p>
+                        <p className="text-ink-muted">{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : `PNG/JPG/WEBP rasio 9:16 — dikompres otomatis`}</p>
                       </div>
                       <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
                     </label>

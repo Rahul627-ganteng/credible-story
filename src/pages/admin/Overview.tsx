@@ -17,7 +17,7 @@ export default function Overview({ period }: { period: RundownPeriod | null }) {
     return r.count ?? 0;
   }, [], ["recruitment_applications"]);
   const { data: recentStories } = useLive(async () =>
-    must(await supabase.from("story_submissions").select("id,member_name,story_target,title,qc_status,created_at").order("created_at", { ascending: false }).limit(6)) as {
+    must(await supabase.from("story_submissions").select("id,member_name,story_target,title,qc_status,created_at").eq("is_archive", false).order("created_at", { ascending: false }).limit(6)) as {
       id: string; member_name: string; story_target: number; title: string; qc_status: string; created_at: string }[],
   [], ["story_submissions"]);
 

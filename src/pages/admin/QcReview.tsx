@@ -2,7 +2,7 @@ import { Check, ExternalLink, Eye, EyeOff, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { Empty, Modal, PageLoader, QcBadge, Spinner, useToast } from "../../components/ui";
 import { previewUrl } from "../../lib/hooks";
-import { fmtDateTime } from "../../lib/rundown";
+import { fmtDate, fmtDateTime, todayJakarta } from "../../lib/rundown";
 import { errMsg, supabase } from "../../lib/supabase";
 import type { RundownPeriod, Story } from "../../lib/types";
 import { useAdminData } from "./data";
@@ -45,6 +45,7 @@ export default function QcReview({ period }: { period: RundownPeriod | null }) {
                   <p className="truncate text-sm font-semibold text-ink">{s.member_name} · S{s.story_target}</p>
                   <p className="line-clamp-1 text-xs text-ink-muted">{s.title}</p>
                   <QcBadge s={s} />
+                  {s.is_published_to_showcase && s.published_at && new Date(s.published_at) > new Date() && <span className="badge-amber">Terjadwal {fmtDate(toJakartaDate(s.published_at))}</span>}
                   <div className="flex gap-1.5 pt-1">
                     <button className="btn-ghost btn-sm flex-1" onClick={() => setOpen(s)}>Tinjau</button>
                     {s.qc_status === "acc" && (
@@ -69,6 +70,7 @@ function ReviewModal({ s, onClose, onDone }: { s: Story; onClose: () => void; on
   const [notes, setNotes] = useState(s.qc_notes ?? "");
   const [wa, setWa] = useState(s.wa_channel_link ?? "");
   const [publish, setPublish] = useState(s.qc_status === "acc" ? s.is_published_to_showcase : true);
+  const [pubDate, setPubDate] = useState(s.published_at ? toJakartaDate(s.published_at) : todayJakarta());
   const [busy, setBusy] = useState(false);
   const src = previewUrl(s.file_url, s.submission_mode);
 
@@ -79,10 +81,12 @@ function ReviewModal({ s, onClose, onDone }: { s: Story; onClose: () => void; on
     const { error } = await supabase.from("story_submissions").update({
       qc_status: status, qc_notes: notes.trim() || null, wa_channel_link: wa.trim() || null,
       is_published_to_showcase: status === "acc" ? publish : false,
+      published_at: status === "acc" && publish ? publishInstant(pubDate, s.published_at) : null,
     }).eq("id", s.id);
     setBusy(false);
     if (error) return toast(errMsg(error), "err");
-    toast(status === "acc" ? (publish ? "Lolos QC & langsung tampil di Galeri" : "Lolos QC") : "Catatan revisi terkirim");
+    const later = pubDate > todayJakarta();
+    toast(status === "acc" ? (publish ? (later ? `Lolos QC — terjadwal tampil ${fmtDate(pubDate, true)} pukul 07.00 WIB` : "Lolos QC & langsung tampil di Galeri") : "Lolos QC") : "Catatan revisi terkirim");
     onDone();
   };
 
@@ -112,9 +116,29 @@ function ReviewModal({ s, onClose, onDone }: { s: Story; onClose: () => void; on
           <label className="block"><span className="label">Link postingan Channel WA (opsional)</span>
             <input className="input" value={wa} onChange={(e) => setWa(e.target.value)} placeholder="https://whatsapp.com/channel/…" />
           </label>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={publish} onChange={(e) => setPublish(e.target.checked)} /> Tampilkan otomatis di Galeri Kurasi publik</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={publish} onChange={(e) => setPublish(e.target.checked)} /> Tampilkan di Galeri Kurasi publik</label>
+          {publish && (
+            <label className="block"><span className="label">Tanggal terbit</span>
+              <input type="date" className="input font-mono" value={pubDate} onChange={(e) => setPubDate(e.target.value || todayJakarta())} />
+              <span className="mt-1 block text-xs text-ink-muted">
+                {pubDate === todayJakarta() ? "Hari ini — langsung tampil di sorotan “Terbit Hari Ini”." : pubDate > todayJakarta() ? `Terjadwal: otomatis tampil ${fmtDate(pubDate, true)} pukul 07.00 WIB.` : "Tanggal lampau — masuk galeri sesuai tanggal tersebut."}
+              </span>
+            </label>
+          )}
         </div>
       </div>
     </Modal>
   );
+}
+
+function toJakartaDate(iso: string) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+}
+
+/** Hari ini → sekarang; tanggal mendatang → 07.00 WIB; tanggal lampau → 19.00 WIB (tetap pakai waktu lama bila tanggalnya sama) */
+function publishInstant(date: string, existing: string | null): string {
+  if (existing && toJakartaDate(existing) === date) return existing;
+  const today = todayJakarta();
+  if (date === today) return new Date().toISOString();
+  return new Date(`${date}T${date > today ? "07:00" : "19:00"}:00+07:00`).toISOString();
 }

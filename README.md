@@ -16,7 +16,14 @@ Ekosistem web terpadu Tim Credible Story: galeri karya publik, pendaftaran tim, 
 | `/app/setoran` | Member aktif | Setor Story 1–3 (upload < 10 MB atau link Drive/Canva) |
 | `/app/belajar` | Member aktif | Learning Hub — 5 materi baru tiap 48 jam |
 | `/app/rekap` | Member aktif | Generator rekap teks WA |
-| `/admin/*` | Super Admin | Member, Pendaftar, Validasi Taqdim, QC & Galeri, Pengingat WA, Rundown & Evaluasi, Pengaturan |
+| `/admin/*` | Super Admin | Member, Pendaftar, Validasi Taqdim, QC & Galeri (dengan jadwal terbit), Arsip Karya, Pengingat WA, Rundown & Evaluasi, Pengaturan |
+
+## Galeri, sorotan & arsip
+
+- Beranda menampilkan sorotan **Terbit Hari Ini** (story dengan tanggal terbit hari ini, WIB); bila belum ada, menampilkan karya terbaru.
+- Saat QC, admin memilih **tanggal terbit**: hari ini = langsung tampil; tanggal mendatang = otomatis tampil pukul 07.00 WIB.
+- Tab **Arsip Karya** untuk mengunggah story lama secara massal (dikompres otomatis di browser), menautkan ke member atau nama bebas, dan mengatur judul/tanggal. Karya arsip tidak dihitung dalam progres rundown & rekap WA.
+- 143 story yang pernah terbit (Apr 2025 – Agu 2026) tersimpan di `public/arsip/`.
 
 ## Keamanan
 

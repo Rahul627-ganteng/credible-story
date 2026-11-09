@@ -66,8 +66,27 @@ export interface Story {
   wa_channel_link: string | null;
   is_published_to_showcase: boolean;
   published_at: string | null;
+  is_archive: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/** Karya arsip: story lama yang sudah terbit (boleh tanpa akun member / tanpa slot Story 1–3) */
+export interface ArchiveItem {
+  id: string;
+  member_id: string | null;
+  member_name: string | null;
+  category: Category | null;
+  period_month: string;
+  title: string | null;
+  submission_mode: "file" | "link";
+  file_url: string;
+  design_app: string | null;
+  wa_channel_link: string | null;
+  is_published_to_showcase: boolean;
+  published_at: string | null;
+  is_archive: boolean;
+  created_at: string;
 }
 
 export interface ShowcaseItem {
@@ -82,6 +101,7 @@ export interface ShowcaseItem {
   design_app: string | null;
   wa_channel_link: string | null;
   published_at: string | null;
+  is_archive: boolean;
 }
 
 export interface PeriodFlag {

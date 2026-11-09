@@ -11,6 +11,7 @@ import QcReview from "./QcReview";
 import Reminders from "./Reminders";
 import RundownSettings from "./RundownSettings";
 import Settings from "./Settings";
+import Archive from "./Archive";
 
 const tabs = [
   { to: "/admin", label: "Ringkasan", end: true },
@@ -18,6 +19,7 @@ const tabs = [
   { to: "/admin/pendaftar", label: "Pendaftar" },
   { to: "/admin/taqdim", label: "Validasi Taqdim" },
   { to: "/admin/qc", label: "QC & Galeri" },
+  { to: "/admin/arsip", label: "Arsip Karya" },
   { to: "/admin/pengingat", label: "Pengingat WA" },
   { to: "/admin/rundown", label: "Rundown & Evaluasi" },
   { to: "/admin/pengaturan", label: "Pengaturan" },
@@ -61,6 +63,7 @@ export default function AdminCenter() {
         <Route path="pendaftar" element={<Applications />} />
         <Route path="taqdim" element={<ConceptReview period={period} />} />
         <Route path="qc" element={<QcReview period={period} />} />
+        <Route path="arsip" element={<Archive />} />
         <Route path="pengingat" element={<Reminders period={period} />} />
         <Route path="rundown" element={<RundownSettings periods={periods ?? []} selected={pm} onSelect={setPm} />} />
         <Route path="pengaturan" element={<Settings />} />

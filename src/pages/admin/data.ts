@@ -17,7 +17,7 @@ export function useAdminData(pm: string) {
       supabase.from("members").select("*").order("name"),
       supabase.from("member_contacts").select("member_id,phone_number"),
       pm ? supabase.from("concept_submissions").select("*").eq("period_month", pm) : Promise.resolve({ data: [], error: null }),
-      pm ? supabase.from("story_submissions").select("*").eq("period_month", pm) : Promise.resolve({ data: [], error: null }),
+      pm ? supabase.from("story_submissions").select("*").eq("period_month", pm).eq("is_archive", false) : Promise.resolve({ data: [], error: null }),
       pm ? supabase.from("member_period_flags").select("*").eq("period_month", pm) : Promise.resolve({ data: [], error: null }),
     ]);
     const phones: Record<string, string | null> = {};

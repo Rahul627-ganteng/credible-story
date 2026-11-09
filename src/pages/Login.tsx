@@ -42,13 +42,18 @@ export default function Login() {
         <div className="absolute inset-0 opacity-60 [background:radial-gradient(circle_at_20%_20%,#DC2626_0,transparent_45%),radial-gradient(circle_at_80%_90%,#991B1B_0,transparent_40%)]" />
         <div className="grid-bg absolute inset-0 opacity-30" />
         <div className="relative flex h-full flex-col justify-between p-12 text-white">
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-white/70">Portal Anggota</span>
+          <div className="flex items-center justify-between">
+            <img src="/brand/logo-white.webp" alt="Credible Story" className="h-11 w-auto" />
+            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">Portal Anggota</span>
+          </div>
           <div>
-            <p className="font-display text-4xl font-extrabold leading-tight">Taqdim. Desain. Setor.<br />Evaluasi. Ulangi.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-crimson-200">Sebarkan kebaikanmu hari ini!</p>
+            <p className="mt-3 font-display text-4xl font-extrabold leading-tight">Taqdim. Desain. Setor.<br />Evaluasi. Ulangi.</p>
             <p className="mt-4 max-w-sm text-white/70">Satu pintu untuk seluruh rundown bulanan Tim Credible Story — dari konsep sampai karya terbit di galeri.</p>
           </div>
-          <div className="flex gap-6 text-sm text-white/70">
-            <span>🟢 Minggu 1 Taqdim</span><span>🔵 Story 1</span><span>🔴 Story 2</span><span>🟡 Story 3</span>
+          <div className="flex items-end justify-between gap-6">
+            <img src="/brand/official-white.webp" alt="Official Story of Credible Generation" className="h-8 w-auto opacity-80" />
+            <div className="flex gap-4 text-xs text-white/60"><span>🟢 Taqdim</span><span>🔵 Story 1</span><span>🔴 Story 2</span><span>🟡 Story 3</span></div>
           </div>
         </div>
       </div>

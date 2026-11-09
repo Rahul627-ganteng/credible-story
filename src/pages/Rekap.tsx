@@ -19,7 +19,7 @@ export default function Rekap() {
     if (!pm) return null;
     const [m, s, f, st] = await Promise.all([
       supabase.from("members").select("id,name,category,role,is_active").eq("is_active", true).eq("role", "member"),
-      supabase.from("story_submissions").select("member_id,qc_status,story_target").eq("period_month", pm),
+      supabase.from("story_submissions").select("member_id,qc_status,story_target").eq("period_month", pm).eq("is_archive", false),
       isAdmin ? supabase.from("member_period_flags").select("*").eq("period_month", pm) : Promise.resolve({ data: [], error: null }),
       isAdmin ? supabase.from("app_settings").select("key,value").eq("key", "recap_footer") : Promise.resolve({ data: [], error: null }),
     ]);
