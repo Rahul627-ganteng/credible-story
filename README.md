@@ -33,7 +33,7 @@ Akun admin dan 29 member sudah dibuat di database dengan username `namadepan.nam
 
 | Secret | Fungsi |
 |---|---|
-| `GEMINI_API_KEY` *atau* `ANTHROPIC_API_KEY` | Generator materi Learning Hub (riset web). Jadwal otomatis: pg_cron `0 0 */2 * *` (07.00 WIB, tiap 2 hari) + tombol manual admin |
+| `GEMINI_API_KEY` (gratis, dari Google AI Studio) *atau* `ANTHROPIC_API_KEY` | Generator materi Learning Hub (riset web). Default `gemini-2.5-flash` + Google Search, cadangan otomatis `gemini-3.5-flash`; bisa diganti lewat secret `GEMINI_MODEL` / `GEMINI_FALLBACK_MODEL`. Jadwal otomatis: pg_cron `0 0 */2 * *` (07.00 WIB, tiap 2 hari) + tombol manual admin |
 | `FONNTE_TOKEN` | Blast pengingat WhatsApp otomatis. Tanpa ini, tombol wa.me tetap berfungsi |
 
 ## Pengembangan lokal

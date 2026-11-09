@@ -81,27 +81,42 @@ function validate(items: unknown): Material[] {
   return out.slice(0, 5);
 }
 
-async function callGemini(key: string, prompt: string) {
-  const model = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+async function geminiOnce(key: string, model: string, prompt: string, withSearch: boolean) {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
+      ...(withSearch ? { tools: [{ google_search: {} }] } : {}),
       generationConfig: { temperature: 0.8, maxOutputTokens: 16000 },
     }),
   });
-  if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw new Error(`Gemini ${model} ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = await res.json();
   const cand = data.candidates?.[0];
   const text = (cand?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
+  if (!text) throw new Error(`Gemini ${model}: respons kosong (${cand?.finishReason ?? "tanpa alasan"})`);
   const sources = (cand?.groundingMetadata?.groundingChunks ?? [])
     .map((c: { web?: { uri: string; title: string } }) => c.web)
     .filter(Boolean)
     .slice(0, 12)
     .map((w: { uri: string; title: string }) => ({ title: w.title, url: w.uri }));
-  return { text, sources, engine: `gemini:${model}` };
+  return { text, sources, engine: `gemini:${model}${withSearch ? "+search" : ""}` };
+}
+
+// Free tier: gemini-2.5-flash + Google Search (gratis s/d 500 req/hari). Cadangan: model Flash terbaru tanpa search.
+async function callGemini(key: string, prompt: string) {
+  const primary = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+  const fallback = Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-3.5-flash";
+  try {
+    return await geminiOnce(key, primary, prompt, true);
+  } catch (e1) {
+    try {
+      return await geminiOnce(key, fallback, prompt, false);
+    } catch (e2) {
+      throw new Error(`${(e1 as Error).message} | cadangan: ${(e2 as Error).message}`.slice(0, 480));
+    }
+  }
 }
 
 async function callClaude(key: string, prompt: string) {
