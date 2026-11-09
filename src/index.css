@@ -3,7 +3,8 @@
 @tailwind utilities;
 
 @layer base {
-  html { -webkit-text-size-adjust: 100%; }
+  html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; scroll-padding-top: 5rem; }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
   body { @apply bg-canvas font-sans text-ink-body antialiased; }
   h1, h2, h3, h4 { @apply font-display text-ink; letter-spacing: -0.015em; }
   ::selection { background: #FECACA; color: #7F1D1D; }
@@ -19,7 +20,8 @@
   .btn-soft { @apply btn border border-crimson-200 bg-crimson-50 text-crimson-800 hover:bg-crimson-100; }
   .btn-dark { @apply btn bg-ink text-white hover:bg-slate-800; }
   .btn-sm { @apply px-3 py-1.5 text-xs rounded-lg; }
-  .input { @apply w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-slate-400 transition focus:border-crimson-500 focus:outline-none focus:ring-4 focus:ring-crimson-500/10 disabled:bg-slate-50; }
+  /* text-base di HP agar iOS tidak auto-zoom saat input difokuskan */
+  .input { @apply w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-slate-400 transition focus:border-crimson-500 focus:outline-none focus:ring-4 focus:ring-crimson-500/10 disabled:bg-slate-50; }
   .label { @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-ink-muted; }
   .badge { @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-semibold; }
   .badge-red { @apply badge border-crimson-200 bg-crimson-50 text-crimson-800; }
@@ -51,3 +53,17 @@
 .scrollbar-thin::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 9999px; }
 @keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .animate-fade-up { animation: fade-up .35s ease both; }
+
+/* ===== Kenyamanan scroll & HP ===== */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.cv-auto { content-visibility: auto; contain-intrinsic-size: 1px 420px; }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.mb-safe-bar { margin-bottom: calc(4.25rem + env(safe-area-inset-bottom)); }
+@media (min-width: 1024px) { .mb-safe-bar { margin-bottom: 0; } }
+.overscroll-contain { overscroll-behavior: contain; }
+
+/* Tabel member → kartu di HP */
+@media (max-width: 767px) {
+  .members-table, .members-table tbody, .members-table td { display: block; width: 100%; }
+}

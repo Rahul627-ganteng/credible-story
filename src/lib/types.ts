@@ -60,10 +60,15 @@ export interface Story {
   member_name: string | null;
   category: Category | null;
   period_month: string;
-  story_target: number;
+  /** null untuk Special Edition */
+  story_target: number | null;
   title: string | null;
   submission_mode: "file" | "link";
   file_url: string;
+  /** Versi final ber-watermark yang ditampilkan di galeri */
+  final_url: string | null;
+  final_uploaded_at: string | null;
+  special_id: string | null;
   design_app: string | null;
   qc_status: "pending_qc" | "revision" | "acc";
   qc_notes: string | null;
@@ -98,7 +103,7 @@ export interface ShowcaseItem {
   member_name: string;
   category: Category | null;
   period_month: string;
-  story_target: number;
+  story_target: number | null;
   title: string | null;
   submission_mode: "file" | "link";
   file_url: string;
@@ -106,7 +111,25 @@ export interface ShowcaseItem {
   wa_channel_link: string | null;
   published_at: string | null;
   is_archive: boolean;
+  is_special: boolean;
 }
+
+/** Credible Story Special Edition: 1 story khusus per momen, 1 PIC, dihitung 2 di rekap */
+export interface SpecialEdition {
+  id: string;
+  title: string;
+  brief: string | null;
+  publish_date: string;
+  deadline: string;
+  period_month: string;
+  pic_member_id: string | null;
+  marked_sent: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Bobot hitungan rekap untuk satu story Special Edition */
+export const SPECIAL_WEIGHT = 2;
 
 export interface PeriodFlag {
   member_id: string;

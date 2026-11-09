@@ -17,8 +17,8 @@ export default function Overview({ period }: { period: RundownPeriod | null }) {
     return r.count ?? 0;
   }, [], ["recruitment_applications"]);
   const { data: recentStories } = useLive(async () =>
-    must(await supabase.from("story_submissions").select("id,member_name,story_target,title,qc_status,created_at").eq("is_archive", false).order("created_at", { ascending: false }).limit(6)) as {
-      id: string; member_name: string; story_target: number; title: string; qc_status: string; created_at: string }[],
+    must(await supabase.from("story_submissions").select("id,member_name,story_target,special_id,title,qc_status,created_at").eq("is_archive", false).order("created_at", { ascending: false }).limit(6)) as {
+      id: string; member_name: string; story_target: number | null; special_id: string | null; title: string; qc_status: string; created_at: string }[],
   [], ["story_submissions"]);
 
   if (loading || !data) return <PageLoader />;
@@ -26,10 +26,10 @@ export default function Overview({ period }: { period: RundownPeriod | null }) {
   const ph = phaseOf(period);
   const q = quotaOf(period);
   const pending = active.filter((m) => pendingReason(ph, progressFor(m.id, data.concepts, data.stories), q));
-  const totalStories = data.stories.length;
+  const totalStories = data.stories.filter((s) => !s.special_id).length;
   const conceptsPending = data.concepts.filter((c) => c.status === "pending").length;
   const qcPending = data.stories.filter((s) => s.qc_status === "pending_qc").length;
-  const ranking = active.map((m) => ({ m, n: data.stories.filter((s) => s.member_id === m.id).length })).sort((a, b) => b.n - a.n || a.m.name.localeCompare(b.m.name));
+  const ranking = active.map((m) => ({ m, n: data.stories.filter((s) => s.member_id === m.id && !s.special_id).length })).sort((a, b) => b.n - a.n || a.m.name.localeCompare(b.m.name));
   const target = active.length * q;
 
   return (
@@ -74,7 +74,7 @@ export default function Overview({ period }: { period: RundownPeriod | null }) {
             <ul className="space-y-2">
               {(recentStories ?? []).map((s) => (
                 <li key={s.id} className="text-sm">
-                  <p className="truncate font-medium text-ink">{s.member_name} · Story {s.story_target}</p>
+                  <p className="truncate font-medium text-ink">{s.member_name} · {s.special_id ? "🌟 Special Edition" : `Story ${s.story_target}`}</p>
                   <p className="truncate text-xs text-ink-muted">{s.title}</p>
                 </li>
               ))}

@@ -5,7 +5,8 @@ import { CopyButton, PageLoader, SectionTitle } from "../components/ui";
 import { activePeriodOf, must, useLive, usePeriods } from "../lib/hooks";
 import { emojiFor, monthLabel, quotaOf } from "../lib/rundown";
 import { supabase } from "../lib/supabase";
-import type { Member, PeriodFlag, Story } from "../lib/types";
+import { specialStatus } from "../lib/special";
+import { SPECIAL_WEIGHT, type Member, type PeriodFlag, type SpecialEdition, type Story } from "../lib/types";
 import { buildRecap } from "../lib/wa";
 
 export default function Rekap() {
@@ -17,19 +18,21 @@ export default function Rekap() {
 
   const { data, loading } = useLive(async () => {
     if (!pm) return null;
-    const [m, s, f, st] = await Promise.all([
+    const [m, s, f, st, sp] = await Promise.all([
       supabase.from("members").select("id,name,category,role,is_active").eq("is_active", true).eq("role", "member"),
-      supabase.from("story_submissions").select("member_id,qc_status,story_target").eq("period_month", pm).eq("is_archive", false),
+      supabase.from("story_submissions").select("*").eq("period_month", pm).eq("is_archive", false),
       isAdmin ? supabase.from("member_period_flags").select("*").eq("period_month", pm) : Promise.resolve({ data: [], error: null }),
       isAdmin ? supabase.from("app_settings").select("key,value").eq("key", "recap_footer") : Promise.resolve({ data: [], error: null }),
+      supabase.from("special_editions").select("*").eq("period_month", pm).order("publish_date"),
     ]);
     return {
       members: must(m) as Pick<Member, "id" | "name" | "category">[],
-      stories: must(s) as Pick<Story, "member_id" | "qc_status" | "story_target">[],
+      stories: must(s) as Story[],
+      specials: must(sp) as SpecialEdition[],
       flags: must(f) as PeriodFlag[],
       footer: ((must(st) as { value: string }[])[0]?.value) ?? "",
     };
-  }, [pm, isAdmin], ["story_submissions", "members", "member_period_flags"]);
+  }, [pm, isAdmin], ["story_submissions", "members", "member_period_flags", "special_editions"]);
 
   const [onlyAcc, setOnlyAcc] = useState(false);
   const [warn, setWarn] = useState(true);
@@ -39,19 +42,26 @@ export default function Rekap() {
 
   const text = useMemo(() => {
     if (!data || !pm) return "";
+    const counted = data.stories.filter((s) => !onlyAcc || s.qc_status === "acc");
     const rows = data.members.map((m) => ({
       member: m,
-      count: data.stories.filter((s) => s.member_id === m.id && (!onlyAcc || s.qc_status === "acc")).length,
+      count: counted.filter((s) => s.member_id === m.id && !s.special_id).length,
+      specials: counted.filter((s) => s.member_id === m.id && s.special_id).length,
       excuse: data.flags.find((f) => f.member_id === m.id)?.excuse_note ?? null,
     }));
-    return buildRecap({ periodMonth: pm, emoji: emoji || "✨", rows, footer: footerOn ? data.footer : "", showZeroWarning: warn, onlyAcc, quota: quotaOf(period) });
+    const specials = data.specials.map((sp) => {
+      const sub = data.stories.find((s) => s.special_id === sp.id);
+      const st = specialStatus(sp, sub);
+      return { title: sp.title, publish_date: sp.publish_date, deadline: sp.deadline, pic: data.members.find((m) => m.id === sp.pic_member_id)?.name ?? "-", sent: st.sent, status: st.text };
+    });
+    return buildRecap({ periodMonth: pm, emoji: emoji || "✨", rows, footer: footerOn ? data.footer : "", showZeroWarning: warn, onlyAcc, quota: quotaOf(period), specials });
   }, [data, pm, onlyAcc, warn, emoji, footerOn, period]);
 
   if (lp) return <PageLoader />;
 
   return (
     <div className="space-y-6">
-      <SectionTitle eyebrow="Generator" title="Rekap Teks WhatsApp" desc="Teks rekap dibaca langsung dari daftar anggota aktif dan setoran bulan terpilih — siap salin ke grup WA."
+      <SectionTitle eyebrow="Generator" title="Rekap Teks WhatsApp" desc="Teks rekap dibaca langsung dari anggota aktif, setoran, dan Special Edition bulan terpilih — siap salin ke grup WA."
         action={
           <select className="input w-auto" value={pm} onChange={(e) => setPm(e.target.value)} aria-label="Periode">
             {(periods ?? []).map((p) => <option key={p.id} value={p.period_month}>{p.emoji} {monthLabel(p.period_month)}</option>)}
@@ -68,7 +78,8 @@ export default function Rekap() {
           {data && (
             <div className="rounded-xl bg-slate-50 p-3 text-xs text-ink-muted">
               <p><b className="text-ink">{data.members.length}</b> anggota aktif</p>
-              <p><b className="text-ink">{data.stories.length}</b> setoran ({data.stories.filter((s) => s.qc_status === "acc").length} lolos QC)</p>
+              <p><b className="text-ink">{data.stories.filter((s) => !s.special_id).length}</b> setoran reguler ({data.stories.filter((s) => !s.special_id && s.qc_status === "acc").length} lolos QC)</p>
+              {data.specials.length > 0 && <p><b className="text-ink">{data.stories.filter((s) => s.special_id).length}/{data.specials.length}</b> Special Edition terkirim (×{SPECIAL_WEIGHT})</p>}
             </div>
           )}
         </div>

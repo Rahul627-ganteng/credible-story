@@ -24,7 +24,7 @@ export default function Members({ period }: { period: RundownPeriod | null }) {
   if (loading || !data) return <PageLoader />;
   const ph = phaseOf(period);
   const late = isLatePhase(ph, quotaOf(period));
-  const countOf = (id: string) => data.stories.filter((s) => s.member_id === id).length;
+  const countOf = (id: string) => data.stories.filter((s) => s.member_id === id && !s.special_id).length;
   const flagOf = (id: string) => data.flags.find((f) => f.member_id === id);
   const isSilent = (m: Member) => m.is_active && m.role === "member" && countOf(m.id) === 0 && !flagOf(m.id)?.has_kabar;
   const onRadar = (m: Member) => (late && isSilent(m)) || m.status === "confirming_retention" || m.status === "warning_sp1";
@@ -77,23 +77,24 @@ export default function Members({ period }: { period: RundownPeriod | null }) {
         </div>
       )}
 
-      <div className="card overflow-x-auto scrollbar-thin">
-        <table className="table-base min-w-[860px]">
-          <thead><tr><th>Anggota</th><th>Kategori</th><th>WhatsApp</th><th>Setoran</th><th>Status</th><th className="text-right">Aksi</th></tr></thead>
+      <div className="card overflow-hidden md:overflow-x-auto md:scrollbar-thin">
+        {/* Di HP setiap baris tampil sebagai kartu; di layar lebar sebagai tabel */}
+        <table className="table-base members-table md:min-w-[860px]">
+          <thead className="hidden md:table-header-group"><tr><th>Anggota</th><th>Kategori</th><th>WhatsApp</th><th>Setoran</th><th>Status</th><th className="text-right">Aksi</th></tr></thead>
           <tbody>
             {rows.map((m) => {
               const n = countOf(m.id);
               const silent = late && isSilent(m);
               return (
-                <tr key={m.id} className={!m.is_active ? "opacity-60" : ""}>
-                  <td>
+                <tr key={m.id} className={`${!m.is_active ? "opacity-60" : ""} block border-b border-slate-100 px-1 py-2 md:table-row md:p-0`}>
+                  <td className="!border-0 md:!border-b">
                     <p className="font-semibold text-ink">{m.name}</p>
                     <p className="font-mono text-xs text-ink-muted">@{m.username}{m.must_change_password && m.is_active && <span className="ml-1.5 text-amber-700">· pw bawaan</span>}</p>
                   </td>
-                  <td>{m.category ?? (m.role === "admin" ? "Admin" : "-")}</td>
-                  <td className="font-mono text-xs">{data.phones[m.id] ?? <span className="text-crimson-700">belum diisi</span>}</td>
-                  <td>{n}/{quotaOf(period)} {flagOf(m.id)?.has_kabar && n === 0 && <span className="badge-slate ml-1">ada kabar</span>}</td>
-                  <td className="space-y-1">
+                  <td className="!border-0 !py-0.5 text-xs md:!border-b md:!py-2.5 md:text-sm"><span className="text-ink-muted md:hidden">Kategori: </span>{m.category ?? (m.role === "admin" ? "Admin" : "-")}</td>
+                  <td className="!border-0 !py-0.5 font-mono text-xs md:!border-b md:!py-2.5"><span className="font-sans text-ink-muted md:hidden">WA: </span>{data.phones[m.id] ?? <span className="text-crimson-700">belum diisi</span>}</td>
+                  <td className="!border-0 !py-0.5 text-xs md:!border-b md:!py-2.5 md:text-sm"><span className="text-ink-muted md:hidden">Setoran: </span>{n}/{quotaOf(period)} {flagOf(m.id)?.has_kabar && n === 0 && <span className="badge-slate ml-1">ada kabar</span>}</td>
+                  <td className="space-y-1 !border-0 md:!border-b">
                     <StatusBadge status={m.status} response={m.retention_response} />
                     {silent && <span className="badge-red flex w-fit"><AlertTriangle className="h-3 w-3" /> TIDAK AKTIF / TANPA KABAR</span>}
                     {m.status === "confirming_retention" && (
@@ -105,8 +106,8 @@ export default function Members({ period }: { period: RundownPeriod | null }) {
                       </select>
                     )}
                   </td>
-                  <td>
-                    <div className="flex flex-wrap justify-end gap-1.5">
+                  <td className="!border-0 md:!border-b">
+                    <div className="flex flex-wrap gap-1.5 md:justify-end">
                       {m.is_active ? (
                         <>
                           {(silent || m.status !== "active") && (

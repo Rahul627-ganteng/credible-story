@@ -1,5 +1,5 @@
-import { ArrowDown, CalendarDays, ExternalLink, Filter, ImageOff, MessageCircle, Search, Sparkles, UserPlus } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, CalendarDays, ChevronLeft, ChevronRight, ExternalLink, Filter, ImageOff, MessageCircle, Search, Sparkles, Star, UserPlus } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Empty, Modal, PageLoader } from "../components/ui";
 import { must, previewUrl, useLive } from "../lib/hooks";
@@ -14,7 +14,7 @@ const jakartaDate = (iso: string | null) =>
 function StoryCard({ it, onOpen, size = "md" }: { it: ShowcaseItem; onOpen: (i: ShowcaseItem) => void; size?: "md" | "lg" }) {
   const src = previewUrl(it.file_url, it.submission_mode);
   return (
-    <button onClick={() => onOpen(it)} className={`group text-left ${size === "lg" ? "w-[200px] shrink-0 snap-start sm:w-[220px]" : ""}`}>
+    <button onClick={() => onOpen(it)} className={`group text-left ${size === "lg" ? "w-[42vw] max-w-[220px] shrink-0 snap-start sm:w-[200px]" : "cv-auto"}`}>
       <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-card transition duration-300 group-hover:-translate-y-1 group-hover:shadow-lift" style={{ aspectRatio: "9/16" }}>
         {src ? (
           <img src={src} alt={it.title ?? "Story"} loading="lazy" decoding="async" className="h-full w-full object-cover" />
@@ -24,6 +24,7 @@ function StoryCard({ it, onOpen, size = "md" }: { it: ShowcaseItem; onOpen: (i: 
           </div>
         )}
         <span className="badge absolute left-2 top-2 border-white/40 bg-white/85 text-ink backdrop-blur">{emojiFor(it.period_month)} {monthLabel(it.period_month).replace(/ \d{4}$/, (y) => " '" + y.trim().slice(2))}</span>
+        {it.is_special && <span className="badge absolute bottom-2 left-2 border-amber-300 bg-amber-100/95 text-amber-900"><Star className="h-3 w-3 fill-amber-400 text-amber-500" /> Special Edition</span>}
       </div>
       <p className="mt-2 line-clamp-2 font-display text-sm font-bold leading-snug text-ink">{it.title}</p>
       <p className="truncate text-xs text-ink-muted">{it.member_name}{it.design_app ? ` · ${it.design_app}` : ""}</p>
@@ -45,6 +46,16 @@ export default function Showcase() {
   const [app, setApp] = useState("");
   const [shown, setShown] = useState(PAGE);
   const [open, setOpen] = useState<ShowcaseItem | null>(null);
+  const carousel = useRef<HTMLDivElement>(null);
+  const sentinel = useRef<HTMLDivElement>(null);
+  const [showTop, setShowTop] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setShowTop(window.scrollY > 1400);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  const slide = (dir: 1 | -1) => carousel.current?.scrollBy({ left: dir * (carousel.current.clientWidth * 0.8), behavior: "smooth" });
 
   const items = data?.items ?? [];
   const today = todayJakarta();
@@ -63,6 +74,16 @@ export default function Showcase() {
     (!app || i.design_app === app) &&
     (!q || `${i.title} ${i.member_name}`.toLowerCase().includes(q.toLowerCase())));
   useEffect(() => setShown(PAGE), [creator, cat, month, app, q]);
+
+  // Muat otomatis saat mendekati bawah galeri (infinite scroll)
+  const hasMore = shown < filtered.length;
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !hasMore) return;
+    const io = new IntersectionObserver((e) => { if (e[0].isIntersecting) setShown((n) => n + PAGE); }, { rootMargin: "900px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, filtered.length]);
 
   const channelFor = (i: ShowcaseItem) => i.wa_channel_link || data?.channel || "";
   const reset = () => { setCreator(""); setCat(""); setMonth(""); setApp(""); setQ(""); };
@@ -138,8 +159,14 @@ export default function Showcase() {
           {loading ? <PageLoader /> : highlight.length === 0 ? (
             <Empty icon={<ImageOff className="h-8 w-8" />} title="Belum ada karya terbit" />
           ) : (
-            <div className="-mx-4 flex snap-x gap-4 overflow-x-auto px-4 pb-3 scrollbar-thin">
-              {highlight.map((it) => <StoryCard key={it.id} it={it} onOpen={setOpen} size="lg" />)}
+            <div className="relative">
+              <div ref={carousel} className="no-scrollbar -mx-4 flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4 pb-2 sm:gap-4">
+                {highlight.map((it) => <StoryCard key={it.id} it={it} onOpen={setOpen} size="lg" />)}
+              </div>
+              {highlight.length > 4 && (<>
+                <button onClick={() => slide(-1)} aria-label="Geser kiri" className="absolute -left-3 top-[40%] hidden h-10 w-10 place-items-center rounded-full bg-white shadow-lift ring-1 ring-slate-200 transition hover:scale-105 sm:grid"><ChevronLeft className="h-5 w-5" /></button>
+                <button onClick={() => slide(1)} aria-label="Geser kanan" className="absolute -right-3 top-[40%] hidden h-10 w-10 place-items-center rounded-full bg-white shadow-lift ring-1 ring-slate-200 transition hover:scale-105 sm:grid"><ChevronRight className="h-5 w-5" /></button>
+              </>)}
             </div>
           )}
         </div>
@@ -151,12 +178,13 @@ export default function Showcase() {
           <p className="eyebrow">Galeri Kurasi</p>
           <h2 className="mt-1 text-2xl font-extrabold sm:text-3xl">Semua Karya Credible Story</h2>
         </div>
-        <div className="card mb-6 p-3 sm:p-4">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="glass sticky top-[var(--hdr,4rem)] z-30 -mx-4 mb-6 px-4 py-2.5 transition-[top] duration-300 sm:mx-0 sm:rounded-2xl sm:px-3 sm:shadow-card">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="relative min-w-[200px] flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input className="input pl-9" placeholder="Cari judul atau kreator…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <input className="input pl-9" type="search" enterKeyHint="search" placeholder="Cari judul atau kreator…" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
+            <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 [&>*]:shrink-0">
             <select className="input w-auto" value={creator} onChange={(e) => setCreator(e.target.value)} aria-label="Pembuat">
               <option value="">Semua kreator</option>
               {opts.creators.map((c) => <option key={c}>{c}</option>)}
@@ -177,25 +205,34 @@ export default function Showcase() {
               </select>
             )}
             {active > 0 && <button className="btn-ghost btn-sm" onClick={reset}><Filter className="h-3.5 w-3.5" /> Reset ({active})</button>}
+            </div>
           </div>
-          {active > 0 && <p className="mt-2 px-1 text-xs text-ink-muted">{filtered.length} karya cocok</p>}
+          {active > 0 && <p className="mt-1.5 px-1 text-xs text-ink-muted">{filtered.length} karya cocok</p>}
         </div>
 
         {loading ? <PageLoader label="Memuat galeri…" /> : filtered.length === 0 ? (
           <Empty icon={<ImageOff className="h-8 w-8" />} title="Belum ada karya yang cocok">Coba ubah filter atau kata kunci pencarian.</Empty>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
               {filtered.slice(0, shown).map((it) => <StoryCard key={it.id} it={it} onOpen={setOpen} />)}
             </div>
-            {shown < filtered.length && (
+            <div ref={sentinel} className="h-px" />
+            {hasMore ? (
               <div className="mt-8 flex justify-center">
                 <button className="btn-ghost" onClick={() => setShown((n) => n + PAGE)}>Muat lebih banyak ({filtered.length - shown} lagi)</button>
               </div>
+            ) : filtered.length > PAGE && (
+              <p className="mt-10 text-center text-sm text-ink-muted">Semua {filtered.length} karya sudah tampil ✦</p>
             )}
           </>
         )}
       </section>
+
+      <button onClick={() => window.scrollTo({ top: document.getElementById("galeri")?.offsetTop ?? 0, behavior: "smooth" })} aria-label="Kembali ke atas galeri"
+        className={`fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-5 z-30 grid h-12 w-12 place-items-center rounded-full bg-ink text-white shadow-lift transition duration-300 ${showTop ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"}`}>
+        <ArrowUp className="h-5 w-5" />
+      </button>
 
       <Modal open={!!open} onClose={() => setOpen(null)} title={open?.title ?? "Karya"} wide>
         {open && (
@@ -211,6 +248,7 @@ export default function Showcase() {
               <div className="flex flex-wrap gap-2">
                 {open.category && <span className="badge-dark">{open.category}</span>}
                 <span className="badge-slate">{emojiFor(open.period_month)} {monthLabel(open.period_month)}</span>
+                {open.is_special && <span className="badge border-amber-300 bg-amber-100 text-amber-900"><Star className="h-3 w-3 fill-amber-400 text-amber-500" /> Credible Story Special Edition</span>}
                 {open.story_target && <span className="badge-slate">Story {open.story_target}</span>}
                 {open.design_app && <span className="badge-red">{open.design_app}</span>}
               </div>

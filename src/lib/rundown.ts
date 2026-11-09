@@ -181,18 +181,25 @@ export interface MemberProgress {
   conceptsRevision: number;
   storiesSubmitted: number;
   storiesAcc: number;
+  /** Jumlah setoran Special Edition (tidak mengisi slot Story 1..N) */
+  specials: number;
   has: (n: number) => boolean;
 }
 
+/** Setoran reguler = bukan Special Edition */
+export const isRegular = (s: Pick<Story, "special_id">) => !s.special_id;
+
 export function progressFor(memberId: string, concepts: Concept[], stories: Story[]): MemberProgress {
   const c = concepts.filter((x) => x.member_id === memberId);
-  const s = stories.filter((x) => x.member_id === memberId);
+  const all = stories.filter((x) => x.member_id === memberId);
+  const s = all.filter(isRegular);
   return {
     conceptsSubmitted: c.length,
     conceptsAcc: c.filter((x) => x.status === "acc").length,
     conceptsRevision: c.filter((x) => x.status === "revision").length,
     storiesSubmitted: s.length,
     storiesAcc: s.filter((x) => x.qc_status === "acc").length,
+    specials: all.length - s.length,
     has: (n) => s.some((x) => x.story_target === n),
   };
 }

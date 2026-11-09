@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { PhaseBanner } from "../components/Rundown";
+import { SpecialTasks } from "../components/SpecialTasks";
 import { Field, PageLoader, ProgressBar, QcBadge, SectionTitle, Spinner, useToast } from "../components/ui";
 import { activePeriodOf, must, previewUrl, useLive, usePeriods } from "../lib/hooks";
 import { deadlinesOf, fmtDate, monthLabel, progressEmoji, quotaOf, storyNums } from "../lib/rundown";
@@ -34,7 +35,7 @@ export default function Setoran() {
     if (!target || !pm) return { concepts: [] as Concept[], stories: [] as Story[] };
     const [c, s] = await Promise.all([
       supabase.from("concept_submissions").select("*").eq("member_id", target.id).eq("period_month", pm),
-      supabase.from("story_submissions").select("*").eq("member_id", target.id).eq("period_month", pm).eq("is_archive", false).order("story_target"),
+      supabase.from("story_submissions").select("*").eq("member_id", target.id).eq("period_month", pm).eq("is_archive", false).is("special_id", null).order("story_target"),
     ]);
     return { concepts: must(c) as Concept[], stories: must(s) as Story[] };
   }, [target?.id, pm], ["concept_submissions", "story_submissions"]);
@@ -122,6 +123,7 @@ export default function Setoran() {
         }
       />
       <PhaseBanner period={period} compact />
+      {!isAdmin && <SpecialTasks memberId={member.id} />}
 
       <div className="grid gap-5 lg:grid-cols-[1.25fr_1fr]">
         <div className="card space-y-5 p-5 sm:p-6">

@@ -20,7 +20,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-[100] flex flex-col items-center gap-2 px-4">
+      <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[100] flex flex-col items-center gap-2 px-4 lg:bottom-4">
         {items.map((t) => (
           <div
             key={t.id}
@@ -99,19 +99,20 @@ export function Modal({ open, onClose, title, children, wide = false, footer }: 
   return (
     <div className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className={`animate-fade-up flex max-h-[92vh] w-full flex-col rounded-t-3xl bg-white shadow-lift sm:rounded-3xl ${wide ? "sm:max-w-4xl" : "sm:max-w-lg"}`}
+        className={`animate-fade-up flex max-h-[92dvh] w-full flex-col rounded-t-3xl bg-white shadow-lift sm:max-h-[92vh] sm:rounded-3xl ${wide ? "sm:max-w-4xl" : "sm:max-w-lg"}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
+        <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-slate-200 sm:hidden" />
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
           <div className="font-display text-lg font-bold text-ink">{title}</div>
           <button className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" onClick={onClose} aria-label="Tutup">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="overflow-y-auto px-5 py-4 scrollbar-thin">{children}</div>
-        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 px-5 py-3">{footer}</div>}
+        <div className="overscroll-contain overflow-y-auto px-5 py-4 scrollbar-thin">{children}</div>
+        {footer && <div className="pb-safe flex flex-wrap justify-end gap-2 border-t border-slate-100 px-5 py-3">{footer}</div>}
       </div>
     </div>
   );

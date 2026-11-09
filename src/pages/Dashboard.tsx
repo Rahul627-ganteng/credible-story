@@ -9,6 +9,7 @@ import { fmtDateTime, monthLabel, phaseOf, progressEmoji, quotaOf, storyNums } f
 import { errMsg, supabase } from "../lib/supabase";
 import type { Concept, LearningMaterial, Story } from "../lib/types";
 import { normalizePhone } from "../lib/wa";
+import { SpecialTasks } from "../components/SpecialTasks";
 
 export default function Dashboard() {
   const { member, isAdmin } = useAuth();
@@ -21,7 +22,7 @@ export default function Dashboard() {
     if (!member || !pm) return { concepts: [] as Concept[], stories: [] as Story[], materials: [] as LearningMaterial[] };
     const [c, s, m] = await Promise.all([
       supabase.from("concept_submissions").select("*").eq("member_id", member.id).eq("period_month", pm),
-      supabase.from("story_submissions").select("*").eq("member_id", member.id).eq("period_month", pm).eq("is_archive", false),
+      supabase.from("story_submissions").select("*").eq("member_id", member.id).eq("period_month", pm).eq("is_archive", false).is("special_id", null),
       supabase.from("learning_materials").select("id,title,design_app,difficulty_level,batch_date").order("created_at", { ascending: false }).limit(3),
     ]);
     return { concepts: must(c) as Concept[], stories: must(s) as Story[], materials: must(m) as LearningMaterial[] };
@@ -82,6 +83,7 @@ export default function Dashboard() {
         </div>
 
         <div className="space-y-5">
+          {!isAdmin && <SpecialTasks memberId={member.id} compact />}
           <div className="card p-5">
             <p className="label flex items-center gap-1.5"><BookOpen className="h-3.5 w-3.5" /> Materi terbaru</p>
             <ul className="mt-2 space-y-2.5">

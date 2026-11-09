@@ -1,6 +1,6 @@
 import type { PhaseInfo } from "./rundown";
 import { deadlinesOf, fmtDate, monthLabel, quotaOf } from "./rundown";
-import type { Category, Member, RundownPeriod } from "./types";
+import { SPECIAL_WEIGHT, type Category, type Member, type RundownPeriod, type SpecialEdition } from "./types";
 
 export function normalizePhone(raw: string | null | undefined): string | null {
   if (!raw) return null;
@@ -41,6 +41,10 @@ export function reminderMessage(ph: PhaseInfo, name: string, period: RundownPeri
   }
 }
 
+export function specialReminderMessage(name: string, sp: Pick<SpecialEdition, "title" | "publish_date" | "deadline" | "brief">): string {
+  return `Assalamu'alaikum ${name} 👋\n\nKamu adalah *PIC Credible Story Special Edition* 🌟\n*${sp.title}*\n\n📅 Tanggal upload: *${fmtDate(sp.publish_date, true)}*\n⏰ Deadline setor: *${fmtDate(sp.deadline, true)}*${sp.brief ? `\n📝 Brief: ${sp.brief}` : ""}\n\nSpecial Edition dihitung *${SPECIAL_WEIGHT} story* di rekap bulanan. Setor lewat portal ya:\n🔗 ${portalUrl()}/app/setoran\n\nJazakallahu khairan 🙏`;
+}
+
 export function retentionMessage(name: string): string {
   return `Halo ${name}, berdasarkan evaluasi rundown bulanan Credible Story, tercatat belum ada setoran karya maupun konfirmasi dari kamu di periode ini. Kami ingin menanyakan secara resmi: Apakah kamu masih berkomitmen untuk lanjut di Tim Credible Story atau tidak? Mohon konfirmasinya. Jika memilih tidak lanjut atau tidak ada kabar, maka status keanggotaan akan kami nonaktifkan. Terima kasih.`;
 }
@@ -57,7 +61,18 @@ export function terminationNotice(name: string): string {
   return `Assalamu'alaikum ${name}. Berdasarkan evaluasi rundown dan tidak adanya konfirmasi, keanggotaan kamu di Tim Credible Story kami nonaktifkan mulai hari ini. Karya yang sudah terbit tetap tersimpan sebagai arsip. Jazakallahu khairan atas kontribusinya selama ini 🙏`;
 }
 
-export interface RecapRow { member: Pick<Member, "id" | "name" | "category">; count: number; excuse?: string | null }
+export interface RecapRow {
+  member: Pick<Member, "id" | "name" | "category">;
+  /** jumlah story reguler */
+  count: number;
+  /** jumlah Special Edition (dihitung SPECIAL_WEIGHT) */
+  specials?: number;
+  excuse?: string | null;
+}
+
+export interface RecapSpecial { title: string; publish_date: string; deadline: string; pic: string; sent: boolean; status: string }
+
+export const recapTotal = (r: RecapRow) => r.count + (r.specials ?? 0) * SPECIAL_WEIGHT;
 
 export function buildRecap(opts: {
   periodMonth: string;
@@ -67,24 +82,37 @@ export function buildRecap(opts: {
   showZeroWarning: boolean;
   onlyAcc: boolean;
   quota: number;
+  specials?: RecapSpecial[];
 }): string {
-  const { periodMonth, emoji, rows, footer, showZeroWarning, onlyAcc, quota } = opts;
-  const byCat = (c: Category) => rows.filter((r) => r.member.category === c && r.count > 0)
+  const { periodMonth, emoji, rows, footer, showZeroWarning, onlyAcc, quota, specials = [] } = opts;
+  const SP = "🌟";
+  const byCat = (c: Category) => rows.filter((r) => r.member.category === c && recapTotal(r) > 0)
     .sort((a, b) => a.member.name.localeCompare(b.member.name, "id"));
-  const line = (r: RecapRow, i: number) => `${i + 1}. ${r.member.name} ${emoji.repeat(Math.min(r.count, quota))}${r.count > quota ? ` (+${r.count - quota})` : ""}`;
-  const total = rows.reduce((s, r) => s + r.count, 0);
-  const contributors = rows.filter((r) => r.count > 0).length;
+  const line = (r: RecapRow, i: number) => {
+    const reg = emoji.repeat(Math.min(r.count, quota)) + (r.count > quota ? ` (+${r.count - quota})` : "");
+    const sp = r.specials ? ` ${SP.repeat(SPECIAL_WEIGHT * r.specials)}` : "";
+    return `${i + 1}. ${r.member.name} ${reg}${sp}${r.specials ? ` = ${recapTotal(r)}` : ""}`;
+  };
+  const regular = rows.reduce((s, r) => s + r.count, 0);
+  const specialCount = rows.reduce((s, r) => s + (r.specials ?? 0), 0);
+  const total = rows.reduce((s, r) => s + recapTotal(r), 0);
+  const contributors = rows.filter((r) => recapTotal(r) > 0).length;
   const ikhwan = byCat("Ikhwan");
   const akhwat = byCat("Akhwat");
-  const zero = rows.filter((r) => r.count === 0).sort((a, b) => a.member.name.localeCompare(b.member.name, "id"));
+  const zero = rows.filter((r) => recapTotal(r) === 0).sort((a, b) => a.member.name.localeCompare(b.member.name, "id"));
   const zeroNoExcuse = zero.filter((r) => !r.excuse);
   const zeroExcuse = zero.filter((r) => r.excuse);
 
   let out = `${emoji} *REKAP SETORAN CREDIBLE STORY*\n*${monthLabel(periodMonth).toUpperCase()}*${onlyAcc ? " _(lolos QC)_" : ""}\n━━━━━━━━━━━━━━━━━━\n\n`;
   out += `🧔 *IKHWAN*\n${ikhwan.length ? ikhwan.map(line).join("\n") : "_Belum ada setoran_"}\n\n`;
   out += `🧕 *AKHWAT*\n${akhwat.length ? akhwat.map(line).join("\n") : "_Belum ada setoran_"}\n\n`;
+  if (specials.length) {
+    out += `${SP} *CREDIBLE STORY SPECIAL EDITION*\n${specials.map((s, i) => `${i + 1}. ${s.title} (${fmtDate(s.publish_date)}) — PIC: ${s.pic} ${s.sent ? "✅" : `⏳ _${s.status}_`}`).join("\n")}\n\n`;
+  }
   out += `📊 Total: *${total} story* dari *${contributors}/${rows.length}* anggota aktif\n`;
+  if (specialCount) out += `   (${regular} reguler + ${specialCount} Special Edition × ${SPECIAL_WEIGHT})\n`;
   out += `${emoji} = 1 story tersetor · Target ${quota} story/bulan\n`;
+  if (specialCount || specials.length) out += `${SP.repeat(SPECIAL_WEIGHT)} = 1 Special Edition (dihitung ${SPECIAL_WEIGHT} story)\n`;
   if (showZeroWarning && zero.length) {
     if (zeroExcuse.length) out += `\n📝 *Berhalangan (ada keterangan):*\n${zeroExcuse.map((r) => `- ${r.member.name} (${r.excuse})`).join("\n")}\n`;
     if (zeroNoExcuse.length)

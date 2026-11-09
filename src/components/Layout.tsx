@@ -1,8 +1,8 @@
 import {
-  BookOpen, ClipboardList, FileText, GalleryVerticalEnd, LayoutDashboard, LogIn, LogOut, Menu, MessageSquareText,
-  ShieldCheck, Upload, UserPlus, X,
+  BookOpen, ClipboardCheck, ClipboardList, FileText, GalleryVerticalEnd, LayoutDashboard, LogIn, LogOut, Menu, MessageSquareText,
+  PackageCheck, ShieldCheck, Star, Upload, UserPlus, X,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
@@ -23,17 +23,50 @@ const linkCls = ({ isActive }: { isActive: boolean }) =>
     isActive ? "bg-white text-crimson-700 shadow-sm ring-1 ring-slate-200" : "text-ink-body hover:bg-white/70 hover:text-ink"
   }`;
 
+/** Sembunyikan header saat scroll ke bawah, tampilkan lagi saat scroll ke atas (HP & desktop) */
+function useHideOnScroll(disabled = false) {
+  const [hidden, setHidden] = useState(false);
+  const last = useRef(0);
+  useEffect(() => {
+    if (disabled) { setHidden(false); return; }
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        const y = window.scrollY;
+        const dy = y - last.current;
+        if (y < 80) setHidden(false);
+        else if (dy > 8) setHidden(true);
+        else if (dy < -8) setHidden(false);
+        last.current = y;
+        ticking = false;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [disabled]);
+  // Elemen lengket lain (mis. filter galeri) mengikuti tinggi header yang terlihat
+  useEffect(() => {
+    document.documentElement.style.setProperty("--hdr", hidden ? "0px" : "4rem");
+    return () => { document.documentElement.style.removeProperty("--hdr"); };
+  }, [hidden]);
+  return hidden;
+}
+
 export function PublicLayout() {
   const { member } = useAuth();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
+  const hidden = useHideOnScroll(open);
+  useEffect(() => setOpen(false), [loc.pathname]);
   const links: { to: string; label: string; icon: ReactNode }[] = [
     { to: "/", label: "Galeri Karya", icon: <GalleryVerticalEnd className="h-4 w-4" /> },
     { to: "/daftar", label: "Daftar Tim", icon: <UserPlus className="h-4 w-4" /> },
   ];
   return (
     <div className="min-h-screen">
-      <header className="glass sticky top-0 z-40 border-x-0 border-t-0">
+      <header className={`glass sticky top-0 z-40 border-x-0 border-t-0 transition-transform duration-300 ${hidden ? "-translate-y-full" : ""}`}>
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4">
           <Logo />
           <nav className="hidden items-center gap-1 sm:flex">
@@ -48,7 +81,7 @@ export function PublicLayout() {
               {member ? "Dashboard" : "Login Anggota"}
             </Link>
           </nav>
-          <button className="rounded-lg p-2 sm:hidden" onClick={() => setOpen(!open)} aria-label="Menu">
+          <button className="-mr-2 rounded-lg p-2.5 sm:hidden" onClick={() => setOpen(!open)} aria-label="Menu">
             {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </div>
@@ -60,7 +93,7 @@ export function PublicLayout() {
                 {l.label}
               </NavLink>
             ))}
-            <Link to={member ? "/app" : "/login"} className="btn-primary mt-2 w-full">
+            <Link to={member ? (member.role === "admin" ? "/admin" : "/app") : "/login"} className="btn-primary mt-2 w-full py-3">
               {member ? "Dashboard" : "Login Anggota"}
             </Link>
           </div>
@@ -112,6 +145,21 @@ export function AppLayout() {
   ];
   if (isAdmin) items.splice(0, 0, { to: "/admin", label: "Admin Center", icon: <ShieldCheck className="h-4 w-4" /> });
 
+  const tabs: { to: string; label: string; icon: ReactNode; end?: boolean }[] = isAdmin
+    ? [
+        { to: "/admin", label: "Admin", icon: <ShieldCheck className="h-5 w-5" />, end: true },
+        { to: "/admin/qc", label: "QC", icon: <ClipboardCheck className="h-5 w-5" /> },
+        { to: "/admin/publikasi", label: "Publikasi", icon: <PackageCheck className="h-5 w-5" /> },
+        { to: "/admin/special", label: "Special", icon: <Star className="h-5 w-5" /> },
+      ]
+    : [
+        { to: "/app", label: "Beranda", icon: <LayoutDashboard className="h-5 w-5" />, end: true },
+        { to: "/app/taqdim", label: "Taqdim", icon: <ClipboardList className="h-5 w-5" /> },
+        { to: "/app/setoran", label: "Setor", icon: <Upload className="h-5 w-5" /> },
+        { to: "/app/belajar", label: "Belajar", icon: <BookOpen className="h-5 w-5" /> },
+      ];
+  useEffect(() => setOpen(false), [loc.pathname]);
+
   const nav = (
     <nav className="flex flex-col gap-1">
       {items.map((i) => (
@@ -142,8 +190,8 @@ export function AppLayout() {
         </button>
       </header>
       {open && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 lg:hidden" onClick={() => setOpen(false)}>
-          <div className="flex h-full w-72 flex-col justify-between bg-canvas p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm lg:hidden" onClick={() => setOpen(false)}>
+          <div className="pb-safe flex h-full w-[82vw] max-w-xs animate-fade-up flex-col justify-between overflow-y-auto bg-canvas p-4" onClick={(e) => e.stopPropagation()}>
             <div>
               <div className="mb-5 flex items-center justify-between">
                 <Logo />
@@ -158,11 +206,30 @@ export function AppLayout() {
         </div>
       )}
 
-      <main key={loc.pathname.split("/").slice(0, 3).join("/")} className="animate-fade-up min-w-0 px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+      <main key={loc.pathname.split("/").slice(0, 3).join("/")} className="animate-fade-up mb-safe-bar min-w-0 px-4 py-5 sm:px-6 lg:px-10 lg:py-8">
         <div className="mx-auto max-w-6xl">
           <Outlet />
         </div>
       </main>
+
+      {/* Tab bar bawah untuk HP */}
+      <nav className="glass pb-safe fixed inset-x-0 bottom-0 z-40 border-x-0 border-b-0 lg:hidden" aria-label="Navigasi utama">
+        <div className="mx-auto grid max-w-lg grid-cols-5">
+          {tabs.map((t) => (
+            <NavLink key={t.to} to={t.to} end={t.end}
+              className={({ isActive }) => `flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold transition ${isActive ? "text-crimson-700" : "text-ink-muted"}`}>
+              {({ isActive }) => (<>
+                <span className={`grid h-8 w-12 place-items-center rounded-full transition ${isActive ? "bg-crimson-50" : ""}`}>{t.icon}</span>
+                {t.label}
+              </>)}
+            </NavLink>
+          ))}
+          <button onClick={() => setOpen(true)} className="flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold text-ink-muted">
+            <span className="grid h-8 w-12 place-items-center rounded-full"><Menu className="h-5 w-5" /></span>
+            Lainnya
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }

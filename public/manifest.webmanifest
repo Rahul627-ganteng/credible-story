@@ -1,0 +1,16 @@
+{
+  "name": "Credible Story — Sebarkan Kebaikanmu Hari Ini!",
+  "short_name": "Credible Story",
+  "description": "Galeri karya & portal rundown Tim Credible Story — Official Story of Credible Generation.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F8FAFC",
+  "theme_color": "#F8FAFC",
+  "lang": "id",
+  "icons": [
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}
