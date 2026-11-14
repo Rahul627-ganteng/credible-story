@@ -69,6 +69,10 @@ export interface Story {
   final_url: string | null;
   final_uploaded_at: string | null;
   special_id: string | null;
+  /** File asli kualitas penuh di bucket privat "originals" (null untuk setoran lama / via link) */
+  original_path: string | null;
+  original_name: string | null;
+  original_size: number | null;
   /** Ditandai saat admin mengunduh (satuan/batch) — yang sudah diunduh tidak ikut batch berikutnya */
   downloaded_at: string | null;
   /** Ditandai manual oleh admin, atau otomatis saat versi final diunggah */

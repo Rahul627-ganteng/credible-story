@@ -2,10 +2,11 @@ import { CheckCircle2, Circle, Download, ExternalLink, EyeOff, ImagePlus, Rotate
 import { useMemo, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { Empty, Field, PageLoader, Spinner, useToast } from "../../components/ui";
-import { previewUrl } from "../../lib/hooks";
+import { must, previewUrl, useLive } from "../../lib/hooks";
 import { compressStory } from "../../lib/image";
 import { STAGE_LABEL, needsWatermark, publishInstant, pubStage, storyLabel, toJakartaDate } from "../../lib/publish";
 import { imageHash } from "../../lib/phash";
+import { ORIGINALS, fetchBestFile } from "../../lib/originals";
 import { fmtDate, fmtDateTime, monthLabel, todayJakarta } from "../../lib/rundown";
 import { errMsg, supabase } from "../../lib/supabase";
 import type { RundownPeriod, Story } from "../../lib/types";
@@ -44,7 +45,7 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
   const scopeItems = scope === "fresh" ? notDownloaded : scope === "nowm" ? notWm : acc;
   const [zipping, setZipping] = useState<{ done: number; total: number } | null>(null);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
-  const fileNameOf = (s: Story) => batchFileName({ pm, label: storyLabel(s, true), name: s.member_name ?? "Tanpa-Nama", title: s.title, id: s.id, ext: extOf(s.file_url) });
+  const fileNameOf = (s: Story, ext = extOf(s.file_url)) => batchFileName({ pm, label: storyLabel(s, true), name: s.member_name ?? "Tanpa-Nama", title: s.title, id: s.id, ext });
   const markDownloaded = async (ids: string[]) => {
     if (!ids.length) return;
     await supabase.from("story_submissions").update({ downloaded_at: new Date().toISOString() }).in("id", ids);
@@ -55,9 +56,9 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
       if (s.submission_mode === "link") {
         window.open(s.file_url, "_blank");
       } else {
-        const res = await fetch(s.file_url);
-        if (!res.ok) throw new Error(`Gagal mengunduh (${res.status})`);
-        downloadBlob(await res.blob(), fileNameOf(s));
+        const f = await fetchBestFile(s);
+        downloadBlob(f.blob, fileNameOf(s, f.ext));
+        if (!f.original) toast("Setoran ini diunggah sebelum fitur file asli — yang tersedia versi ringan, diunduh sebagai PNG", "info");
       }
       await markDownloaded([s.id]);
       toast(`${s.member_name} · ${storyLabel(s)} diunduh — tidak akan ikut batch berikutnya`);
@@ -86,18 +87,19 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
     setZipping({ done: 0, total: items.length });
     const entries: { name: string; data: Uint8Array | string }[] = [];
     const links: string[] = [];
-    const daftar: string[] = ["Kode\tStory\tNama\tKategori\tJudul"];
+    const daftar: string[] = ["Kode\tStory\tNama\tKategori\tJudul\tKualitas"];
+    let lite = 0;
     for (const s of items) {
       const label = storyLabel(s, true);
-      daftar.push(`${s.id.slice(0, 8)}\t${label}\t${s.member_name}\t${s.category ?? "-"}\t${s.title ?? "-"}`);
       if (s.submission_mode === "link") {
+        daftar.push(`${s.id.slice(0, 8)}\t${label}\t${s.member_name}\t${s.category ?? "-"}\t${s.title ?? "-"}\tlink`);
         links.push(`${s.id.slice(0, 8)} | ${label} | ${s.member_name} | ${s.title ?? "-"}\n   ${s.file_url}`);
       } else {
         try {
-          const res = await fetch(s.file_url);
-          if (!res.ok) throw new Error(String(res.status));
-          const buf = new Uint8Array(await res.arrayBuffer());
-          entries.push({ name: `${s.category ?? "Lainnya"}/${fileNameOf(s)}`, data: buf });
+          const f = await fetchBestFile(s);
+          if (!f.original) lite++;
+          daftar.push(`${s.id.slice(0, 8)}\t${label}\t${s.member_name}\t${s.category ?? "-"}\t${s.title ?? "-"}\t${f.original ? "file asli" : "versi ringan (PNG)"}`);
+          entries.push({ name: `${s.category ?? "Lainnya"}/${fileNameOf(s, f.ext)}`, data: new Uint8Array(await f.blob.arrayBuffer()) });
         } catch {
           links.push(`${s.id.slice(0, 8)} | ${label} | ${s.member_name} | GAGAL DIUNDUH — buka manual:\n   ${s.file_url}`);
         }
@@ -110,8 +112,28 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
     downloadBlob(makeZip(entries), `CredibleStory_Batch-ACC_${pm}${scope === "all" ? "_semua" : scope === "nowm" ? "_belum-watermark" : ""}_${todayJakarta()}.zip`);
     await markDownloaded(items.map((s) => s.id));
     setZipping(null);
-    toast(`${entries.length - (links.length ? 3 : 2)} desain diunduh${links.length ? ` · ${links.length} perlu diunduh manual (lihat LINK_EKSTERNAL.txt)` : ""}`);
+    toast(`${entries.length - (links.length ? 3 : 2)} desain diunduh${lite ? ` (${lite} setoran lama hanya tersedia versi ringan)` : " dalam kualitas asli"}${links.length ? ` · ${links.length} perlu diunduh manual (lihat LINK_EKSTERNAL.txt)` : ""}`);
     reload();
+  };
+
+  // ---------- Penyimpanan file asli ----------
+  const { data: origRows, reload: reloadOrig } = useLive(async () =>
+    must(await supabase.from("story_submissions").select("id,original_path,original_size,is_published_to_showcase").not("original_path", "is", null)) as Pick<Story, "id" | "original_path" | "original_size" | "is_published_to_showcase">[],
+  [], ["story_submissions"]);
+  const origMB = (origRows ?? []).reduce((t, r) => t + (r.original_size ?? 0), 0) / 1048576;
+  const origPublished = (origRows ?? []).filter((r) => r.is_published_to_showcase);
+  const [cleaning, setCleaning] = useState(false);
+  const cleanPublished = async () => {
+    if (!origPublished.length) return;
+    if (!confirm(`Hapus ${origPublished.length} file asli dari story yang sudah terbit di galeri? Versi galeri & data setoran tetap ada. Pastikan file aslinya sudah kamu simpan.`)) return;
+    setCleaning(true);
+    const paths = origPublished.map((r) => r.original_path!).filter(Boolean);
+    const { error } = await supabase.storage.from(ORIGINALS).remove(paths);
+    if (!error) await supabase.from("story_submissions").update({ original_path: null, original_name: null, original_size: null }).in("id", origPublished.map((r) => r.id));
+    setCleaning(false);
+    if (error) return toast(errMsg(error), "err");
+    toast(`${paths.length} file asli dihapus — ruang penyimpanan lega lagi`);
+    reloadOrig(); reload();
   };
 
   // ---------- 2. Unggah hasil watermark ----------
@@ -225,7 +247,7 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
 
       {/* Langkah 1 */}
       <section className="card p-5">
-        <StepHead n={1} title="Unduh desain ACC" desc="Unduh satuan dari daftar di bawah, atau sekaligus satu .zip. Story yang sudah diunduh (satuan maupun batch) tidak ikut batch berikutnya. Nama file berisi kode 8 karakter untuk pencocokan otomatis." />
+        <StepHead n={1} title="Unduh desain ACC" desc="Unduh satuan dari daftar di bawah, atau sekaligus satu .zip — dalam format & kualitas asli dari member (PNG/JPG), bukan WebP. Story yang sudah diunduh tidak ikut batch berikutnya. Nama file berisi kode 8 karakter untuk pencocokan otomatis." />
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <select className="input w-auto" value={scope} onChange={(e) => setScope(e.target.value as Scope)} aria-label="Isi batch">
             <option value="fresh">Belum pernah diunduh ({notDownloaded.length})</option>
@@ -237,6 +259,15 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
           </button>
         </div>
         {notAcc > 0 && <p className="mt-3 text-xs text-amber-800">⚠️ Masih ada {notAcc} setoran belum ACC bulan ini. Selesaikan QC dulu bila ingin batch lengkap.</p>}
+        <div className={`mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs ${origMB > 700 ? "bg-amber-50 text-amber-900" : "bg-slate-50 text-ink-muted"}`}>
+          <span>
+            Unduhan memakai <b className="text-ink">file asli kualitas penuh</b> dari member. Tersimpan: {(origRows ?? []).length} file · {origMB < 1024 ? `${origMB.toFixed(0)} MB` : `${(origMB / 1024).toFixed(2)} GB`} dari kuota penyimpanan gratis 1 GB.
+            {origMB > 700 && " Hampir penuh — kosongkan file asli story yang sudah terbit."}
+          </span>
+          {origPublished.length > 0 && (
+            <button className="btn-ghost btn-sm" onClick={cleanPublished} disabled={cleaning}>{cleaning ? <Spinner /> : null} Kosongkan {origPublished.length} file asli yang sudah terbit</button>
+          )}
+        </div>
 
         <div className="mt-5">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -266,6 +297,9 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
                       <p className="truncate text-xs text-ink-muted">{s.title || "Tanpa judul"} · <span className="font-mono">{s.id.slice(0, 8)}</span></p>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <span className={st.cls}>{st.text}{s.published_at && isLive ? ` · ${fmtDate(toJakartaDate(s.published_at))}` : ""}</span>
+                        {s.submission_mode === "file" && (s.original_path
+                          ? <span className="badge-green" title={s.original_name ?? undefined}>File asli{s.original_size ? ` · ${(s.original_size / 1048576).toFixed(1)} MB` : ""}</span>
+                          : <span className="badge-slate" title="Diunggah sebelum fitur file asli; diunduh sebagai PNG">Versi ringan</span>)}
                         {s.downloaded_at && !s.final_url && (
                           <span className="badge-slate" title={`Diunduh ${fmtDateTime(s.downloaded_at)}`}>
                             <Download className="h-3 w-3" /> Diunduh {fmtDate(toJakartaDate(s.downloaded_at))}
@@ -275,7 +309,7 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
                       </div>
                     </div>
                     <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto">
-                      <button className="btn-ghost btn-sm" onClick={() => downloadOne(s)} disabled={rowBusy === s.id} title={s.submission_mode === "link" ? "Buka link karya" : "Unduh file asli"}>
+                      <button className="btn-ghost btn-sm" onClick={() => downloadOne(s)} disabled={rowBusy === s.id} title={s.submission_mode === "link" ? "Buka link karya" : s.original_path ? "Unduh file asli kualitas penuh" : "Unduh (versi ringan, sebagai PNG)"}>
                         {rowBusy === s.id ? <Spinner /> : s.submission_mode === "link" ? <ExternalLink className="h-3.5 w-3.5" /> : <Download className="h-3.5 w-3.5" />} Unduh
                       </button>
                       <button onClick={() => setWatermark(s, !wm)} disabled={rowBusy === s.id || !!s.final_url} aria-pressed={wm}

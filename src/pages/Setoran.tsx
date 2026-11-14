@@ -8,10 +8,11 @@ import { activePeriodOf, must, previewUrl, useLive, usePeriods } from "../lib/ho
 import { deadlinesOf, fmtDate, monthLabel, progressEmoji, quotaOf, storyNums } from "../lib/rundown";
 import { compressStory } from "../lib/image";
 import { imageHash } from "../lib/phash";
+import { removeOriginals, uploadOriginal, type OriginalInfo } from "../lib/originals";
 import { errMsg, supabase } from "../lib/supabase";
 import { DESIGN_APPS, type Member, type Story } from "../lib/types";
 
-const MAX_MB = 40; // file mentah; dikompres otomatis ke < 1 MB sebelum diunggah
+const MAX_MB = 40; // file asli disimpan utuh untuk admin; galeri memakai versi ringan (WebP)
 
 export default function Setoran() {
   const { member, isAdmin } = useAuth();
@@ -74,14 +75,21 @@ export default function Setoran() {
     try {
       let url = link.trim();
       let hash: string | null = null;
+      let orig: OriginalInfo | null = null;
+      const prev = stories.find((s) => s.story_target === storyN);
       if (mode === "file") {
         if (!file) throw new Error("Pilih file gambar story terlebih dulu.");
         const up = await compressStory(file);
         hash = await imageHash(up).catch(() => null);
         const ext = up.name.split(".").pop()?.toLowerCase() || "png";
         const path = `${member.id}/${period.period_month}/${target.id}-story${storyN}-${Date.now()}.${ext}`;
-        const { error } = await supabase.storage.from("stories").upload(path, up, { contentType: up.type, cacheControl: "31536000" });
-        if (error) throw error;
+        // File asli kualitas penuh (untuk diunduh admin) + versi ringan (untuk pratinjau & galeri)
+        const [r, o] = await Promise.all([
+          supabase.storage.from("stories").upload(path, up, { contentType: up.type, cacheControl: "31536000" }),
+          uploadOriginal(file, member.id, period.period_month, `${target.id}-story${storyN}`),
+        ]);
+        if (r.error) throw r.error;
+        orig = o;
         url = supabase.storage.from("stories").getPublicUrl(path).data.publicUrl;
       } else if (!/^https:\/\/(drive\.google\.com|docs\.google\.com|www\.canva\.com|canva\.link|[\w.-]+)\//.test(url)) {
         throw new Error("Tempel link Google Drive / Canva yang valid (diawali https://).");
@@ -89,10 +97,12 @@ export default function Setoran() {
       const { error } = await supabase.from("story_submissions").upsert({
         member_id: target.id, period_month: period.period_month, story_target: storyN,
         submission_mode: mode, file_url: url, design_app: app, title: title.trim() || null, image_hash: hash,
+        original_path: orig?.original_path ?? null, original_name: orig?.original_name ?? null, original_size: orig?.original_size ?? null,
         ...(isAdmin ? {} : { qc_status: "pending_qc" }),
       }, { onConflict: "member_id,period_month,story_target" });
-      if (error) throw error;
-      toast(`Story ${storyN} tersetor! Menunggu QC admin 🎉`);
+      if (error) { await removeOriginals([orig?.original_path]); throw error; }
+      if (prev?.original_path && prev.original_path !== orig?.original_path) await removeOriginals([prev.original_path]);
+      toast(mode === "file" && !orig ? `Story ${storyN} tersetor, tapi file aslinya gagal disimpan (maks. ${MAX_MB} MB) — admin akan mengunduh versi ringan.` : `Story ${storyN} tersetor! Menunggu QC admin 🎉`, mode === "file" && !orig ? "info" : undefined);
       setFile(null); setLink("");
       reload();
     } catch (e) {
@@ -105,7 +115,7 @@ export default function Setoran() {
   const removeStory = async (s: Story) => {
     if (!confirm(`Hapus setoran Story ${s.story_target}?`)) return;
     const { error } = await supabase.from("story_submissions").delete().eq("id", s.id);
-    if (error) toast(errMsg(error), "err"); else { toast("Setoran dihapus"); reload(); }
+    if (error) toast(errMsg(error), "err"); else { await removeOriginals([s.original_path]); toast("Setoran dihapus"); reload(); }
   };
 
   if (lp || !member) return <PageLoader />;

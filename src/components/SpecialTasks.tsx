@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { must, previewUrl, useLive } from "../lib/hooks";
 import { compressStory } from "../lib/image";
 import { imageHash } from "../lib/phash";
+import { removeOriginals, uploadOriginal, type OriginalInfo } from "../lib/originals";
 import { addDays, fmtDate, todayJakarta } from "../lib/rundown";
 import { specialStatus } from "../lib/special";
 import { errMsg, supabase } from "../lib/supabase";
@@ -77,20 +78,27 @@ function SpecialCard({ sp, sub, memberId, onDone }: { sp: SpecialEdition; sub?: 
     try {
       let url = link.trim();
       let hash: string | null = null;
+      let orig: OriginalInfo | null = null;
       if (mode === "file") {
         if (!file) throw new Error("Pilih file gambar dulu.");
         const up = await compressStory(file);
         hash = await imageHash(up).catch(() => null);
         const path = `${memberId}/special/${sp.id}-${Date.now()}.${up.name.split(".").pop()}`;
-        const r = await supabase.storage.from("stories").upload(path, up, { contentType: up.type, cacheControl: "31536000" });
+        const [r, o] = await Promise.all([
+          supabase.storage.from("stories").upload(path, up, { contentType: up.type, cacheControl: "31536000" }),
+          uploadOriginal(file, memberId, "special", sp.id),
+        ]);
         if (r.error) throw r.error;
+        orig = o;
         url = supabase.storage.from("stories").getPublicUrl(path).data.publicUrl;
       } else if (!/^https:\/\//.test(url)) throw new Error("Tempel link yang diawali https://");
-      const row = { submission_mode: mode, file_url: url, design_app: app, title: sp.title, image_hash: hash };
+      const row = { submission_mode: mode, file_url: url, design_app: app, title: sp.title, image_hash: hash,
+        original_path: orig?.original_path ?? null, original_name: orig?.original_name ?? null, original_size: orig?.original_size ?? null };
       const { error } = sub
         ? await supabase.from("story_submissions").update(row).eq("id", sub.id)
         : await supabase.from("story_submissions").insert({ ...row, member_id: memberId, special_id: sp.id, period_month: sp.period_month, story_target: null });
-      if (error) throw error;
+      if (error) { await removeOriginals([orig?.original_path]); throw error; }
+      if (sub?.original_path && sub.original_path !== orig?.original_path) await removeOriginals([sub.original_path]);
       toast("Special Edition terkirim! Menunggu QC admin 🌟");
       setOpenForm(false); setFile(null); setLink("");
       onDone();
