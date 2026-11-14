@@ -1,4 +1,4 @@
-import { Copy as CopyIcon, Eye, EyeOff, ImagePlus, Layers, Pencil, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
+import { Copy as CopyIcon, Eye, EyeOff, ImagePlus, Layers, Pencil, RefreshCw, Search, Star, Trash2, Upload, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { Empty, Field, Modal, PageLoader, Spinner, Stat, useToast } from "../../components/ui";
@@ -62,7 +62,7 @@ export default function Archive() {
   const toast = useToast();
   const { data, loading, reload } = useLive(async () => {
     const [a, m] = await Promise.all([
-      supabase.from("story_submissions").select("id,member_id,member_name,category,period_month,title,submission_mode,file_url,final_url,design_app,wa_channel_link,is_published_to_showcase,published_at,is_archive,created_at,image_hash,duplicate_of,dup_ignore").eq("is_archive", true).order("published_at", { ascending: false, nullsFirst: true }),
+      supabase.from("story_submissions").select("id,member_id,member_name,category,period_month,title,submission_mode,file_url,final_url,design_app,wa_channel_link,is_published_to_showcase,published_at,is_archive,created_at,image_hash,duplicate_of,dup_ignore,special_flag").eq("is_archive", true).order("published_at", { ascending: false, nullsFirst: true }),
       supabase.from("members").select("id,name,category,is_active,role").eq("role", "member").order("name"),
     ]);
     return { items: must(a) as ArchiveItem[], members: must(m) as MemberLite[], all: await loadDupRows() };
@@ -70,7 +70,7 @@ export default function Archive() {
 
   // ---------- unggah massal ----------
   const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [batch, setBatch] = useState({ memberId: null as string | null, name: TEAM, category: "" as Category | "", app: "", wa: "", publish: true });
+  const [batch, setBatch] = useState({ memberId: null as string | null, name: TEAM, category: "" as Category | "", app: "", wa: "", publish: true, special: false });
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   const labelOf = (r: Pick<DupRow, "member_name" | "published_at" | "is_archive">) =>
@@ -123,7 +123,7 @@ export default function Archive() {
           is_archive: true, member_id: batch.memberId, member_name: batch.memberId ? null : batch.name.trim(),
           category: batch.memberId ? null : batch.category || null, period_month: d.date.slice(0, 7),
           story_target: null, title: null, submission_mode: "file", file_url: url, image_hash: d.hash ?? null,
-          design_app: batch.app || null, wa_channel_link: batch.wa.trim() || null, qc_status: "acc",
+          design_app: batch.app || null, wa_channel_link: batch.wa.trim() || null, qc_status: "acc", special_flag: batch.special,
           is_published_to_showcase: batch.publish, published_at: batch.publish ? pubInstant(d.date) : null,
         });
         if (error) throw error;
@@ -145,11 +145,12 @@ export default function Archive() {
   const [month, setMonth] = useState("");
   const [onlyTeam, setOnlyTeam] = useState(false);
   const [onlyDup, setOnlyDup] = useState(false);
+  const [onlySpecial, setOnlySpecial] = useState(false);
   const [edit, setEdit] = useState<ArchiveItem | null>(null);
   const items = data?.items ?? [];
   const months = useMemo(() => [...new Set(items.map((i) => i.period_month))].sort().reverse(), [items]);
   const list = items.filter((i) => (!month || i.period_month === month) && (!onlyTeam || (!i.member_id && (i.member_name ?? TEAM) === TEAM)) &&
-    (!onlyDup || !!i.duplicate_of) && (!q || `${i.member_name ?? TEAM}`.toLowerCase().includes(q.toLowerCase())));
+    (!onlyDup || !!i.duplicate_of) && (!onlySpecial || i.special_flag) && (!q || `${i.member_name ?? TEAM}`.toLowerCase().includes(q.toLowerCase())));
   const today = todayJakarta();
 
   if (loading || !data) return <PageLoader />;
@@ -220,7 +221,10 @@ export default function Archive() {
               ))}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={batch.publish} onChange={(e) => setBatch({ ...batch, publish: e.target.checked })} /> Langsung tampilkan di galeri publik</label>
+              <div className="flex flex-wrap gap-x-5 gap-y-2">
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={batch.publish} onChange={(e) => setBatch({ ...batch, publish: e.target.checked })} /> Langsung tampilkan di galeri publik</label>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-amber-500" checked={batch.special} onChange={(e) => setBatch({ ...batch, special: e.target.checked })} /> <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" /> Credible Story Special Edition</label>
+              </div>
               <div className="flex gap-2">
                 <button className="btn-ghost" onClick={() => setDrafts([])} disabled={!!progress}>Batal</button>
                 <button className="btn-primary" onClick={uploadAll} disabled={!!progress || !queue.length || drafts.some((d) => d.hash === undefined)}>
@@ -247,6 +251,7 @@ export default function Archive() {
           </select>
           <button className={onlyTeam ? "btn-dark" : "btn-ghost"} onClick={() => setOnlyTeam(!onlyTeam)}>Kreator belum diisi ({unattributed})</button>
           {dupCount > 0 && <button className={onlyDup ? "btn-dark" : "btn-ghost"} onClick={() => setOnlyDup(!onlyDup)}>Duplikat ({dupCount})</button>}
+          <button className={onlySpecial ? "btn-dark" : "btn-ghost"} onClick={() => setOnlySpecial(!onlySpecial)}><Star className="h-4 w-4 text-amber-500" /> Special Edition ({items.filter((i) => i.special_flag).length})</button>
         </div>
         {list.length === 0 ? <Empty title="Tidak ada karya arsip yang cocok" /> : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
@@ -259,6 +264,7 @@ export default function Archive() {
                     <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-ink/70 py-1.5 text-xs font-semibold text-white opacity-0 transition group-hover:opacity-100"><Pencil className="h-3 w-3" /> Ubah</span>
                     {it.duplicate_of ? <span className="badge absolute left-1.5 top-1.5 border-amber-300 bg-amber-100 text-amber-900">Duplikat</span>
                       : !it.is_published_to_showcase && <span className="badge-dark absolute left-1.5 top-1.5">Disembunyikan</span>}
+                    {it.special_flag && <Star className="absolute right-1.5 top-1.5 h-4 w-4 fill-amber-400 text-amber-500 drop-shadow" />}
                   </button>
                   <p className={`mt-1.5 truncate text-xs font-semibold ${!it.member_id && (it.member_name ?? TEAM) === TEAM ? "text-amber-700" : "text-ink"}`}>{it.member_name || TEAM}</p>
                   <p className="truncate text-[11px] text-ink-muted">{it.published_at ? `Terbit ${fmtDate(isoDate(it.published_at))}` : "Belum terbit"}</p>
@@ -281,6 +287,7 @@ function EditArchive({ item, members, onClose, onDone }: { item: ArchiveItem; me
   const [app, setApp] = useState(item.design_app ?? "");
   const [wa, setWa] = useState(item.wa_channel_link ?? "");
   const [show, setShow] = useState(item.is_published_to_showcase);
+  const [special, setSpecial] = useState(!!item.special_flag);
   const [busy, setBusy] = useState(false);
   const src = previewUrl(item.file_url, item.submission_mode);
 
@@ -293,7 +300,7 @@ function EditArchive({ item, members, onClose, onDone }: { item: ArchiveItem; me
       member_id: creator.memberId, member_name: creator.memberId ? null : creator.name.trim(),
       category: creator.memberId ? null : creator.category || null,
       period_month: date.slice(0, 7), design_app: app || null, wa_channel_link: wa.trim() || null,
-      is_published_to_showcase: show, published_at: show ? (keepTime ? item.published_at : pubInstant(date)) : null,
+      is_published_to_showcase: show, published_at: show ? (keepTime ? item.published_at : pubInstant(date)) : null, special_flag: special,
     }).eq("id", item.id);
     setBusy(false);
     if (error) return toast(errMsg(error), "err");
@@ -334,6 +341,10 @@ function EditArchive({ item, members, onClose, onDone }: { item: ArchiveItem; me
           </div>
           <Field label="Link Channel WA (opsional)"><input className="input" value={wa} onChange={(e) => setWa(e.target.value)} placeholder="https://whatsapp.com/channel/…" /></Field>
           {item.duplicate_of && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">Karya ini terdeteksi <b>identik</b> dengan karya lain, jadi tidak ditampilkan dua kali di galeri. Atur di panel <b>Duplikat &amp; story menumpuk</b>.</p>}
+          <label className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm">
+            <input type="checkbox" className="h-4 w-4 accent-amber-500" checked={special} onChange={(e) => setSpecial(e.target.checked)} />
+            <Star className="h-4 w-4 fill-amber-400 text-amber-500" /> Credible Story Special Edition <span className="text-xs text-ink-muted">(tampil di bagian khusus galeri)</span>
+          </label>
           <button type="button" className={show ? "btn-ghost" : "btn-dark"} onClick={() => setShow(!show)}>
             {show ? <><Eye className="h-4 w-4" /> Tampil di galeri — klik untuk sembunyikan</> : <><EyeOff className="h-4 w-4" /> Disembunyikan — klik untuk tampilkan</>}
           </button>

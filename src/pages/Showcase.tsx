@@ -179,7 +179,7 @@ export default function Showcase() {
       </section>
 
       {/* ================= SPECIAL EDITION ================= */}
-      {specials.length > 0 && (
+      {!loading && (
         <section id="special" className="scroll-mt-20 border-b border-amber-200/70 bg-gradient-to-br from-amber-50 via-white to-amber-50/40">
           <div className="mx-auto max-w-6xl px-4 py-10">
             <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
@@ -188,13 +188,21 @@ export default function Showcase() {
                 <div>
                   <p className="eyebrow !text-amber-700">Edisi khusus hari istimewa</p>
                   <h2 className="mt-0.5 text-2xl font-extrabold sm:text-3xl">Credible Story Special Edition</h2>
-                  <p className="mt-1 text-sm text-ink-muted">{specials.length} karya spesial untuk momen-momen berharga.</p>
+                  <p className="mt-1 text-sm text-ink-muted">{specials.length ? `${specials.length} karya spesial untuk momen-momen berharga.` : "Story khusus untuk hari-hari istimewa — seperti Maulid Nabi, Hari Guru, dan Tahun Baru Hijriah."}</p>
                 </div>
               </div>
-              <button onClick={() => { setOnlySpecial(true); document.getElementById("galeri")?.scrollIntoView({ behavior: "smooth" }); }} className="inline-flex items-center gap-1 text-sm font-semibold text-amber-800">
-                Lihat semua <ArrowDown className="h-4 w-4" />
-              </button>
+              {specials.length > 0 && (
+                <button onClick={() => { setOnlySpecial(true); document.getElementById("galeri")?.scrollIntoView({ behavior: "smooth" }); }} className="inline-flex items-center gap-1 text-sm font-semibold text-amber-800">
+                  Lihat semua <ArrowDown className="h-4 w-4" />
+                </button>
+              )}
             </div>
+            {specials.length === 0 ? (
+              <div className="flex items-center gap-3 rounded-2xl border border-dashed border-amber-300 bg-white/70 px-5 py-6 text-sm text-amber-900">
+                <Star className="h-5 w-5 shrink-0 fill-amber-300 text-amber-400" />
+                Special Edition pertama akan segera terbit di sini. Nantikan, dan ikuti Channel WhatsApp Credible Story agar tidak ketinggalan ✨
+              </div>
+            ) : (
             <div className="relative">
               <div ref={specialRow} className="no-scrollbar -mx-4 flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4 pb-2 sm:gap-4">
                 {specials.map((it) => <StoryCard key={it.id} it={it} onOpen={setOpen} size="lg" hideSpecialBadge />)}
@@ -204,6 +212,7 @@ export default function Showcase() {
                 <button onClick={() => slide(1, specialRow.current)} aria-label="Geser kanan" className="absolute -right-3 top-[40%] hidden h-10 w-10 place-items-center rounded-full bg-white shadow-lift ring-1 ring-amber-200 transition hover:scale-105 sm:grid"><ChevronRight className="h-5 w-5" /></button>
               </>)}
             </div>
+            )}
           </div>
         </section>
       )}

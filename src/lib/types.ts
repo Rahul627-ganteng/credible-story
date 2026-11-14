@@ -108,6 +108,8 @@ export interface ArchiveItem {
   image_hash: string | null;
   duplicate_of: string | null;
   dup_ignore: boolean;
+  /** Ditandai admin sebagai Credible Story Special Edition (karya lama) */
+  special_flag: boolean;
 }
 
 export interface ShowcaseItem {

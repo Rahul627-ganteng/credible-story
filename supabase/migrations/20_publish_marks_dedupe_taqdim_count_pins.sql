@@ -193,3 +193,19 @@ create trigger special_resync_taqdim after insert or update of pic_member_id, pe
 -- Data lama: yang sudah dicentang "sudah taqdim" dianggap lengkap sesuai target
 update public.member_period_flags set taqdim_count = greatest(public.period_quota(period_month), 1) where taqdim_done and taqdim_count = 0;
 update public.member_period_flags set updated_at = updated_at;
+
+-- ===== 21: tanda Special Edition untuk karya arsip =====
+alter table public.story_submissions add column if not exists special_flag boolean not null default false;
+create or replace function public.story_special_flag_guard()
+ returns trigger language plpgsql security definer set search_path to ''
+as $function$
+begin
+  if not public.is_privileged() then
+    new.special_flag := case when tg_op = 'UPDATE' then old.special_flag else false end;
+  end if;
+  return new;
+end $function$;
+drop trigger if exists story_special_flag_guard on public.story_submissions;
+create trigger story_special_flag_guard before insert or update on public.story_submissions
+  for each row execute function public.story_special_flag_guard();
+-- showcase_list: is_special = (special_id is not null or special_flag)
