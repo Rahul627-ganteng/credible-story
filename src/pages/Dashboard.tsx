@@ -6,7 +6,7 @@ import { PhaseBanner } from "../components/Rundown";
 import { EmojiPicker } from "../components/EmojiPicker";
 import { Markdown, PageLoader, ProgressBar, QcBadge, Spinner, useToast } from "../components/ui";
 import { activePeriodOf, must, useLive, usePeriods } from "../lib/hooks";
-import { fmtDate, fmtDateTime, monthLabel, phaseOf, progressEmoji, quotaOf, storyNums } from "../lib/rundown";
+import { fmtDate, fmtDateTime, monthLabel, phaseOf, progressEmoji, quotaOf, storyNums, taqdimInfo } from "../lib/rundown";
 import { errMsg, supabase } from "../lib/supabase";
 import type { LearningMaterial, PeriodFlag, Story } from "../lib/types";
 import { normalizePhone } from "../lib/wa";
@@ -20,17 +20,19 @@ export default function Dashboard() {
   const lastEval = periods?.find((p) => p.monthly_evaluation_notes && p.evaluation_published_at);
 
   const { data, loading } = useLive(async () => {
-    if (!member || !pm) return { flag: null as PeriodFlag | null, stories: [] as Story[], materials: [] as LearningMaterial[] };
-    const [f, s, m] = await Promise.all([
+    if (!member || !pm) return { flag: null as PeriodFlag | null, stories: [] as Story[], materials: [] as LearningMaterial[], specials: 0 };
+    const [f, s, m, sp] = await Promise.all([
       supabase.from("member_period_flags").select("*").eq("member_id", member.id).eq("period_month", pm).maybeSingle(),
       supabase.from("story_submissions").select("*").eq("member_id", member.id).eq("period_month", pm).eq("is_archive", false).is("special_id", null),
       supabase.from("learning_materials").select("id,title,design_app,difficulty_level,batch_date").order("created_at", { ascending: false }).limit(3),
+      supabase.from("special_editions").select("id", { count: "exact", head: true }).eq("pic_member_id", member.id).eq("period_month", pm),
     ]);
-    return { flag: (f.data ?? null) as PeriodFlag | null, stories: must(s) as Story[], materials: must(m) as LearningMaterial[] };
-  }, [member?.id, pm], ["member_period_flags", "story_submissions", "learning_materials"]);
+    return { flag: (f.data ?? null) as PeriodFlag | null, stories: must(s) as Story[], materials: must(m) as LearningMaterial[], specials: sp.count ?? 0 };
+  }, [member?.id, pm], ["member_period_flags", "story_submissions", "learning_materials", "special_editions"]);
 
   if (lp || loading || !member) return <PageLoader />;
-  const taqdimDone = !!data?.flag?.taqdim_done;
+  const tq = taqdimInfo(data?.flag ?? undefined, data?.specials ?? 0, quotaOf(period));
+  const taqdimDone = tq.done || !!data?.flag?.taqdim_done;
   const stories = data?.stories ?? [];
   const done = stories.length;
   const ph = phaseOf(period);
@@ -66,8 +68,10 @@ export default function Dashboard() {
             <div className={`mt-4 flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm ${taqdimDone ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
               {taqdimDone ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <Clock className="mt-0.5 h-4 w-4 shrink-0" />}
               <p>{taqdimDone
-                ? <>Taqdim konsep bulan ini <b>sudah diterima admin</b>.</>
-                : <>Taqdim konsep <b>belum ditandai</b>. Kirim {q} konsep story ke admin lewat WhatsApp sebelum <b>{fmtDate(period.w1_end)}</b>.</>}</p>
+                ? <>Taqdim konsep bulan ini <b>lengkap ({Math.min(tq.total, q) || q}/{q})</b> dan sudah diterima admin.{tq.bonus ? <> Termasuk <b>+{tq.bonus}</b> dari Special Edition yang kamu pegang 🌟</> : null}</>
+                : tq.total > 0
+                  ? <>Taqdim konsep tercatat <b>{tq.total}/{q}</b>{tq.bonus ? <> (termasuk +{tq.bonus} dari Special Edition 🌟)</> : null}. Kirim {q - tq.total} konsep lagi ke admin lewat WhatsApp sebelum <b>{fmtDate(period.w1_end)}</b>.</>
+                  : <>Taqdim konsep <b>belum tercatat</b>. Kirim {q} konsep story ke admin lewat WhatsApp sebelum <b>{fmtDate(period.w1_end)}</b>.</>}</p>
             </div>
           )}
           <div className="mt-5 divide-y divide-slate-100 rounded-xl border border-slate-200">

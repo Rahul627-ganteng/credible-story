@@ -1,17 +1,24 @@
-import { CheckCircle2, Download, EyeOff, FileArchive, ImagePlus, Send, Star, Upload } from "lucide-react";
+import { CheckCircle2, Circle, Download, ExternalLink, EyeOff, ImagePlus, RotateCcw, Send, Star, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { Empty, Field, PageLoader, Spinner, useToast } from "../../components/ui";
 import { previewUrl } from "../../lib/hooks";
 import { compressStory } from "../../lib/image";
-import { STAGE_LABEL, publishInstant, pubStage, storyLabel, toJakartaDate } from "../../lib/publish";
-import { fmtDate, monthLabel, todayJakarta } from "../../lib/rundown";
+import { STAGE_LABEL, needsWatermark, publishInstant, pubStage, storyLabel, toJakartaDate } from "../../lib/publish";
+import { imageHash } from "../../lib/phash";
+import { fmtDate, fmtDateTime, monthLabel, todayJakarta } from "../../lib/rundown";
 import { errMsg, supabase } from "../../lib/supabase";
 import type { RundownPeriod, Story } from "../../lib/types";
 import { batchFileName, codeFromFileName, downloadBlob, makeZip } from "../../lib/zip";
 import { useAdminData } from "./data";
 
 interface FinalDraft { key: string; file: File; preview: string; storyId: string | null }
+
+type ListFilter = "all" | "nowm" | "notdl" | "dl" | "wm" | "ready" | "live";
+const LIST_FILTERS: [ListFilter, string][] = [
+  ["nowm", "Belum watermark"], ["notdl", "Belum diunduh"], ["dl", "Sudah diunduh"], ["wm", "Sudah watermark"],
+  ["ready", "Final siap terbit"], ["live", "Terbit"], ["all", "Semua"],
+]
 
 const extOf = (url: string) => (url.split("?")[0].match(/\.(png|jpe?g|webp|gif)$/i)?.[1] ?? "png").toLowerCase().replace("jpeg", "jpg");
 
@@ -23,17 +30,59 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
 
   const acc = useMemo(() => (data?.stories ?? []).filter((s) => s.qc_status === "acc")
     .sort((a, b) => (a.category ?? "").localeCompare(b.category ?? "") || (a.member_name ?? "").localeCompare(b.member_name ?? "") || (a.story_target ?? 99) - (b.story_target ?? 99)), [data]);
-  const needFinal = acc.filter((s) => pubStage(s) === "need_final");
+  const needFinal = acc.filter((s) => ["need_final", "watermarked"].includes(pubStage(s)));
+  const notWm = acc.filter(needsWatermark);
+  const wmNoFinal = acc.filter((s) => pubStage(s) === "watermarked");
   const ready = acc.filter((s) => pubStage(s) === "final_ready");
   const live = acc.filter((s) => ["published", "scheduled"].includes(pubStage(s)));
   const notAcc = (data?.stories ?? []).filter((s) => s.qc_status !== "acc").length;
+  const notDownloaded = notWm.filter((s) => !s.downloaded_at);
 
-  // ---------- 1. Unduh batch ----------
-  const [onlyNew, setOnlyNew] = useState(true);
+  // ---------- 1. Unduh (batch / satuan) ----------
+  type Scope = "fresh" | "nowm" | "all";
+  const [scope, setScope] = useState<Scope>("fresh");
+  const scopeItems = scope === "fresh" ? notDownloaded : scope === "nowm" ? notWm : acc;
   const [zipping, setZipping] = useState<{ done: number; total: number } | null>(null);
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const fileNameOf = (s: Story) => batchFileName({ pm, label: storyLabel(s, true), name: s.member_name ?? "Tanpa-Nama", title: s.title, id: s.id, ext: extOf(s.file_url) });
+  const markDownloaded = async (ids: string[]) => {
+    if (!ids.length) return;
+    await supabase.from("story_submissions").update({ downloaded_at: new Date().toISOString() }).in("id", ids);
+  };
+  const downloadOne = async (s: Story) => {
+    setRowBusy(s.id);
+    try {
+      if (s.submission_mode === "link") {
+        window.open(s.file_url, "_blank");
+      } else {
+        const res = await fetch(s.file_url);
+        if (!res.ok) throw new Error(`Gagal mengunduh (${res.status})`);
+        downloadBlob(await res.blob(), fileNameOf(s));
+      }
+      await markDownloaded([s.id]);
+      toast(`${s.member_name} · ${storyLabel(s)} diunduh — tidak akan ikut batch berikutnya`);
+      reload();
+    } catch (e) {
+      toast(errMsg(e), "err");
+      window.open(s.file_url, "_blank");
+    } finally {
+      setRowBusy(null);
+    }
+  };
+  const setWatermark = async (s: Story, on: boolean) => {
+    setRowBusy(s.id);
+    const { error } = await supabase.from("story_submissions").update({ watermarked_at: on ? new Date().toISOString() : null }).eq("id", s.id);
+    setRowBusy(null);
+    if (error) return toast(errMsg(error), "err");
+    reload();
+  };
+  const resetDownload = async (s: Story) => {
+    const { error } = await supabase.from("story_submissions").update({ downloaded_at: null }).eq("id", s.id);
+    if (error) toast(errMsg(error), "err"); else { toast("Masuk antrean batch lagi"); reload(); }
+  };
   const downloadBatch = async () => {
-    const items = onlyNew ? needFinal : acc;
-    if (!items.length) return toast("Tidak ada story ACC untuk diunduh", "info");
+    const items = scopeItems;
+    if (!items.length) return toast("Tidak ada story untuk diunduh di pilihan ini", "info");
     setZipping({ done: 0, total: items.length });
     const entries: { name: string; data: Uint8Array | string }[] = [];
     const links: string[] = [];
@@ -48,7 +97,7 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
           const res = await fetch(s.file_url);
           if (!res.ok) throw new Error(String(res.status));
           const buf = new Uint8Array(await res.arrayBuffer());
-          entries.push({ name: `${s.category ?? "Lainnya"}/${batchFileName({ pm, label, name: s.member_name ?? "Tanpa-Nama", title: s.title, id: s.id, ext: extOf(s.file_url) })}`, data: buf });
+          entries.push({ name: `${s.category ?? "Lainnya"}/${fileNameOf(s)}`, data: buf });
         } catch {
           links.push(`${s.id.slice(0, 8)} | ${label} | ${s.member_name} | GAGAL DIUNDUH — buka manual:\n   ${s.file_url}`);
         }
@@ -58,9 +107,11 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
     entries.push({ name: "DAFTAR.tsv", data: daftar.join("\n") });
     entries.push({ name: "CARA_PAKAI.txt", data: `Batch ACC Credible Story — ${monthLabel(pm)}\n\n1. Beri watermark di Photoshop.\n2. JANGAN hapus kode 8 karakter di akhir nama file (mis. _${items[0].id.slice(0, 8)}). Boleh menambah akhiran seperti _wm.\n3. Unggah semua hasilnya di Admin Center › Batch & Publikasi › langkah 2 — sistem mencocokkan otomatis lewat kode tersebut.\n` });
     if (links.length) entries.push({ name: "LINK_EKSTERNAL.txt", data: `Story yang disetor sebagai link (unduh manual):\n\n${links.join("\n\n")}\n` });
-    downloadBlob(makeZip(entries), `CredibleStory_Batch-ACC_${pm}${onlyNew ? "" : "_semua"}.zip`);
+    downloadBlob(makeZip(entries), `CredibleStory_Batch-ACC_${pm}${scope === "all" ? "_semua" : scope === "nowm" ? "_belum-watermark" : ""}_${todayJakarta()}.zip`);
+    await markDownloaded(items.map((s) => s.id));
     setZipping(null);
     toast(`${entries.length - (links.length ? 3 : 2)} desain diunduh${links.length ? ` · ${links.length} perlu diunduh manual (lihat LINK_EKSTERNAL.txt)` : ""}`);
+    reload();
   };
 
   // ---------- 2. Unggah hasil watermark ----------
@@ -84,11 +135,12 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
     for (const d of todo) {
       try {
         const up = await compressStory(d.file, 1440, 2560, 0.92);
+        const hash = await imageHash(up).catch(() => null);
         const path = `${me.id}/final/${pm}/${d.storyId}-${Date.now()}.${up.name.split(".").pop()}`;
         const r = await supabase.storage.from("stories").upload(path, up, { contentType: up.type, cacheControl: "31536000" });
         if (r.error) throw r.error;
         const url = supabase.storage.from("stories").getPublicUrl(path).data.publicUrl;
-        const { error } = await supabase.from("story_submissions").update({ final_url: url }).eq("id", d.storyId!);
+        const { error } = await supabase.from("story_submissions").update({ final_url: url, ...(hash ? { image_hash: hash } : {}) }).eq("id", d.storyId!);
         if (error) throw error;
         ok++;
       } catch (e) {
@@ -105,6 +157,7 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
 
   // ---------- 3. Terbitkan ----------
   const [pick, setPick] = useState<Record<string, boolean>>({});
+  const [listFilter, setListFilter] = useState<ListFilter>("nowm");
   const [pubDate, setPubDate] = useState(todayJakarta());
   const [waLink, setWaLink] = useState("");
   const [publishing, setPublishing] = useState(false);
@@ -130,6 +183,19 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
 
   if (loading || !data) return <PageLoader />;
 
+  const matchFilter = (x: Story, k: ListFilter) => {
+    const stg = pubStage(x);
+    switch (k) {
+      case "nowm": return needsWatermark(x);
+      case "notdl": return needsWatermark(x) && !x.downloaded_at;
+      case "dl": return !!x.downloaded_at && !x.final_url && !["published", "scheduled"].includes(stg);
+      case "wm": return stg === "watermarked";
+      case "ready": return stg === "final_ready";
+      case "live": return stg === "published" || stg === "scheduled";
+      default: return true;
+    }
+  };
+
   const Thumb = ({ s, final = false }: { s: Story; final?: boolean }) => {
     const src = previewUrl(final && s.final_url ? s.final_url : s.file_url, final && s.final_url ? "file" : s.submission_mode);
     return (
@@ -144,10 +210,10 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          ["Belum ACC / revisi", notAcc, "di tab QC"],
-          ["Menunggu watermark", needFinal.length, "langkah 1–2"],
+          ["Belum watermark", notWm.length, `${notDownloaded.length} belum diunduh`],
+          ["Sudah watermark", wmNoFinal.length, "final belum diunggah"],
           ["Final siap terbit", ready.length, "langkah 3"],
-          ["Sudah di galeri", live.length, monthLabel(pm)],
+          ["Sudah di galeri", live.length, notAcc ? `${notAcc} setoran belum ACC` : monthLabel(pm)],
         ].map(([l, v, sub]) => (
           <div key={String(l)} className="card p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{l}</p>
@@ -159,14 +225,73 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
 
       {/* Langkah 1 */}
       <section className="card p-5">
-        <StepHead n={1} title="Unduh batch desain ACC" desc={`Semua story ACC ${monthLabel(pm)} dalam satu .zip, dipisah per folder Ikhwan/Akhwat. Nama file berisi kode 8 karakter untuk pencocokan otomatis.`} />
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button className="btn-primary" onClick={downloadBatch} disabled={!!zipping || !acc.length}>
-            {zipping ? <><Spinner /> Menyiapkan {zipping.done}/{zipping.total}…</> : <><Download className="h-4 w-4" /> Unduh batch ({onlyNew ? needFinal.length : acc.length} story)</>}
+        <StepHead n={1} title="Unduh desain ACC" desc="Unduh satuan dari daftar di bawah, atau sekaligus satu .zip. Story yang sudah diunduh (satuan maupun batch) tidak ikut batch berikutnya. Nama file berisi kode 8 karakter untuk pencocokan otomatis." />
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <select className="input w-auto" value={scope} onChange={(e) => setScope(e.target.value as Scope)} aria-label="Isi batch">
+            <option value="fresh">Belum pernah diunduh ({notDownloaded.length})</option>
+            <option value="nowm">Semua yang belum watermark ({notWm.length})</option>
+            <option value="all">Semua story ACC ({acc.length})</option>
+          </select>
+          <button className="btn-primary" onClick={downloadBatch} disabled={!!zipping || !scopeItems.length}>
+            {zipping ? <><Spinner /> Menyiapkan {zipping.done}/{zipping.total}…</> : <><Download className="h-4 w-4" /> Unduh batch ({scopeItems.length})</>}
           </button>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} /> Hanya yang belum diberi watermark</label>
         </div>
         {notAcc > 0 && <p className="mt-3 text-xs text-amber-800">⚠️ Masih ada {notAcc} setoran belum ACC bulan ini. Selesaikan QC dulu bila ingin batch lengkap.</p>}
+
+        <div className="mt-5">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-ink">Daftar story ACC · {monthLabel(pm)}</p>
+            <div className="no-scrollbar -mx-1 flex gap-1 overflow-x-auto px-1">
+              {LIST_FILTERS.map(([k, l]) => {
+                const n = acc.filter((x) => matchFilter(x, k)).length;
+                return (
+                  <button key={k} onClick={() => setListFilter(k)} className={`whitespace-nowrap rounded-full border px-3 py-1 text-xs font-semibold ${listFilter === k ? "border-ink bg-ink text-white" : "border-slate-200 bg-white text-ink-body"}`}>
+                    {l} <span className="opacity-60">{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {acc.length === 0 ? <Empty title="Belum ada story ACC bulan ini" /> : (
+            <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+              {acc.filter((x) => matchFilter(x, listFilter)).map((s) => {
+                const st = STAGE_LABEL[pubStage(s)];
+                const wm = !!(s.watermarked_at || s.final_url);
+                const isLive = ["published", "scheduled"].includes(pubStage(s));
+                return (
+                  <div key={s.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+                    <Thumb s={s} final />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink">{s.member_name} · {storyLabel(s)}</p>
+                      <p className="truncate text-xs text-ink-muted">{s.title || "Tanpa judul"} · <span className="font-mono">{s.id.slice(0, 8)}</span></p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <span className={st.cls}>{st.text}{s.published_at && isLive ? ` · ${fmtDate(toJakartaDate(s.published_at))}` : ""}</span>
+                        {s.downloaded_at && !s.final_url && (
+                          <span className="badge-slate" title={`Diunduh ${fmtDateTime(s.downloaded_at)}`}>
+                            <Download className="h-3 w-3" /> Diunduh {fmtDate(toJakartaDate(s.downloaded_at))}
+                            <button className="ml-0.5 rounded hover:text-ink" onClick={() => resetDownload(s)} title="Masukkan lagi ke antrean batch"><RotateCcw className="h-3 w-3" /></button>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto">
+                      <button className="btn-ghost btn-sm" onClick={() => downloadOne(s)} disabled={rowBusy === s.id} title={s.submission_mode === "link" ? "Buka link karya" : "Unduh file asli"}>
+                        {rowBusy === s.id ? <Spinner /> : s.submission_mode === "link" ? <ExternalLink className="h-3.5 w-3.5" /> : <Download className="h-3.5 w-3.5" />} Unduh
+                      </button>
+                      <button onClick={() => setWatermark(s, !wm)} disabled={rowBusy === s.id || !!s.final_url} aria-pressed={wm}
+                        title={s.final_url ? "Versi final sudah diunggah" : wm ? "Klik bila ternyata belum diberi watermark" : "Tandai sudah diberi watermark"}
+                        className={`btn-sm ${wm ? "btn bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "btn-ghost"}`}>
+                        {wm ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />} {wm ? "Sudah watermark" : "Belum watermark"}
+                      </button>
+                      {isLive && <button className="btn-ghost btn-sm" onClick={() => unpublish(s)} title="Turunkan dari galeri"><EyeOff className="h-3.5 w-3.5" /></button>}
+                    </div>
+                  </div>
+                );
+              })}
+              {acc.filter((x) => matchFilter(x, listFilter)).length === 0 && <p className="px-4 py-6 text-center text-sm text-ink-muted">Tidak ada story di filter ini.</p>}
+            </div>
+          )}
+        </div>
       </section>
 
       {/* Langkah 2 */}
@@ -207,9 +332,9 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
         )}
         {needFinal.length > 0 && (
           <details className="mt-4 text-sm">
-            <summary className="cursor-pointer font-semibold text-ink">Belum ada versi final ({needFinal.length})</summary>
+            <summary className="cursor-pointer font-semibold text-ink">Belum ada versi final ({needFinal.length}{wmNoFinal.length ? ` · ${wmNoFinal.length} sudah watermark` : ""})</summary>
             <ul className="mt-2 grid gap-1 text-xs text-ink-muted sm:grid-cols-2">
-              {needFinal.map((s) => <li key={s.id}><span className="font-mono">{s.id.slice(0, 8)}</span> · {s.member_name} · {storyLabel(s, true)} · {s.title}</li>)}
+              {needFinal.map((s) => <li key={s.id}><span className="font-mono">{s.id.slice(0, 8)}</span> · {s.member_name} · {storyLabel(s, true)} · {s.title}{s.watermarked_at ? " · ✓ watermark" : ""}</li>)}
             </ul>
           </details>
         )}
@@ -246,33 +371,6 @@ export default function Publish({ period }: { period: RundownPeriod | null }) {
         )}
       </section>
 
-      {/* Status lengkap */}
-      <section className="card p-5">
-        <p className="mb-3 flex items-center gap-2 font-display font-bold text-ink"><FileArchive className="h-4 w-4 text-crimson-600" /> Status publikasi {monthLabel(pm)}</p>
-        {acc.length === 0 ? <Empty title="Belum ada story ACC bulan ini" /> : (
-          <div className="divide-y divide-slate-100">
-            {acc.map((s) => {
-              const st = STAGE_LABEL[pubStage(s)];
-              return (
-                <div key={s.id} className="flex items-center gap-3 py-2.5">
-                  <Thumb s={s} final />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-ink">{s.member_name} · {storyLabel(s)}</p>
-                    <p className="truncate text-xs text-ink-muted">{s.title}</p>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <span className={st.cls}>{st.text}{s.published_at && ["published", "scheduled"].includes(pubStage(s)) ? ` · ${fmtDate(toJakartaDate(s.published_at))}` : ""}</span>
-                      <span className="font-mono text-[10px] text-ink-muted">{s.id.slice(0, 8)}</span>
-                    </div>
-                  </div>
-                  {["published", "scheduled"].includes(pubStage(s)) && (
-                    <button className="btn-ghost btn-sm" onClick={() => unpublish(s)} title="Turunkan dari galeri"><EyeOff className="h-3.5 w-3.5" /></button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
     </div>
   );
 }

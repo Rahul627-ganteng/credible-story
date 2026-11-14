@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { must, previewUrl, useLive } from "../lib/hooks";
 import { compressStory } from "../lib/image";
+import { imageHash } from "../lib/phash";
 import { addDays, fmtDate, todayJakarta } from "../lib/rundown";
 import { specialStatus } from "../lib/special";
 import { errMsg, supabase } from "../lib/supabase";
@@ -75,15 +76,17 @@ function SpecialCard({ sp, sub, memberId, onDone }: { sp: SpecialEdition; sub?: 
     setBusy(true);
     try {
       let url = link.trim();
+      let hash: string | null = null;
       if (mode === "file") {
         if (!file) throw new Error("Pilih file gambar dulu.");
         const up = await compressStory(file);
+        hash = await imageHash(up).catch(() => null);
         const path = `${memberId}/special/${sp.id}-${Date.now()}.${up.name.split(".").pop()}`;
         const r = await supabase.storage.from("stories").upload(path, up, { contentType: up.type, cacheControl: "31536000" });
         if (r.error) throw r.error;
         url = supabase.storage.from("stories").getPublicUrl(path).data.publicUrl;
       } else if (!/^https:\/\//.test(url)) throw new Error("Tempel link yang diawali https://");
-      const row = { submission_mode: mode, file_url: url, design_app: app, title: sp.title };
+      const row = { submission_mode: mode, file_url: url, design_app: app, title: sp.title, image_hash: hash };
       const { error } = sub
         ? await supabase.from("story_submissions").update(row).eq("id", sub.id)
         : await supabase.from("story_submissions").insert({ ...row, member_id: memberId, special_id: sp.id, period_month: sp.period_month, story_target: null });

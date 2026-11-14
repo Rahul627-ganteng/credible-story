@@ -1,13 +1,14 @@
-import { AlertTriangle, FolderOpen, KeyRound, MessageCircle, Pencil, RotateCcw, Search, UserMinus, UserPlus } from "lucide-react";
+import { AlertTriangle, FolderOpen, KeyRound, Pencil, RotateCcw, Search, UserMinus, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
-import { Field, Modal, PageLoader, Spinner, useToast } from "../../components/ui";
+import { CopyButton, Field, Modal, PageLoader, Spinner, useToast } from "../../components/ui";
 import { isLatePhase, phaseOf, quotaOf } from "../../lib/rundown";
 import { errMsg, supabase } from "../../lib/supabase";
 import { DESIGN_APPS, type Category, type Credentials, type Member, type RundownPeriod } from "../../lib/types";
 import { normalizePhone, retentionMessage, terminationNotice, waLink } from "../../lib/wa";
 import { logReminder, useAdminData } from "./data";
 import { CredentialsModal, StatusBadge } from "./shared";
+import { WaActions } from "../../components/WaActions";
 
 export default function Members({ period }: { period: RundownPeriod | null }) {
   const pm = period?.period_month ?? "";
@@ -41,9 +42,7 @@ export default function Members({ period }: { period: RundownPeriod | null }) {
   };
 
   const sendRetention = async (m: Member) => {
-    const link = waLink(data.phones[m.id], retentionMessage(m.name));
-    if (!link) return toast(`Nomor WA ${m.name} belum diisi`, "err");
-    window.open(link, "_blank");
+    if (m.status === "confirming_retention") { if (pm) await logReminder(m.id, pm, flagOf(m.id)); return; }
     await setStatus(m, { status: "confirming_retention", retention_response: "menunggu" });
     if (pm) await logReminder(m.id, pm, flagOf(m.id));
     toast("Status: Menunggu Konfirmasi");
@@ -111,7 +110,7 @@ export default function Members({ period }: { period: RundownPeriod | null }) {
                       {m.is_active ? (
                         <>
                           {(silent || m.status !== "active") && (
-                            <button className="btn-soft btn-sm" onClick={() => sendRetention(m)} title="Kirim Peringatan & Konfirmasi Lanjut"><MessageCircle className="h-3.5 w-3.5" /> Peringatan & Konfirmasi</button>
+                            <WaActions phone={data.phones[m.id]} message={retentionMessage(m.name)} label="Peringatan & Konfirmasi" variant="soft" copyLabel="Salin" onUse={() => sendRetention(m)} />
                           )}
                           {m.retention_response === "lanjut" && <button className="btn-ghost btn-sm" onClick={() => setStatus(m, { status: "active" })}>Pulihkan aktif</button>}
                           {m.folder_url && <a className="btn-ghost btn-sm" href={m.folder_url} target="_blank" rel="noreferrer" title="Folder Drive"><FolderOpen className="h-3.5 w-3.5" /></a>}
@@ -281,7 +280,10 @@ function TerminateModal({ m, phone, onClose, onDone }: { m: Member; phone: strin
         <Field label={`Ketik username "${m.username}" untuk konfirmasi`}>
           <input className="input font-mono" value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus />
         </Field>
-        <label className="flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> Buka WhatsApp untuk memberi tahu member</label>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label className="flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> Buka WhatsApp untuk memberi tahu member</label>
+          <CopyButton text={terminationNotice(m.name)} label="Salin teks pemberitahuan" />
+        </div>
         <p className="text-xs text-ink-muted">Bisa dibatalkan kapan saja lewat tab Dikeluarkan → Aktifkan kembali.</p>
       </div>
     </Modal>

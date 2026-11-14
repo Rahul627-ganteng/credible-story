@@ -1,5 +1,6 @@
-// Credible Story — Generator 5 Materi Belajar (riset web + Pinterest + video YouTube)
-// Dipanggil oleh pg_cron (header x-cron-token) setiap 48 jam, atau manual oleh admin (JWT).
+// Credible Story — Generator Materi Belajar (riset web + Pinterest + video YouTube)
+// Dipanggil oleh pg_cron (header x-cron-token) setiap 48 jam, atau manual oleh admin (JWT)
+// dengan pilihan aplikasi, tingkat, jumlah, dan topik.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const cors = {
@@ -11,7 +12,36 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
 const APPS = ["Canva", "Figma", "Photoshop", "Illustrator", "After Effects", "CapCut", "PixelLab", "Alight Motion"];
-const LEVELS = ["Easy", "Easy", "Intermediate", "Intermediate", "Advanced"];
+const LEVEL_NAMES = ["Easy", "Intermediate", "Advanced"] as const;
+type Level = (typeof LEVEL_NAMES)[number];
+const DEFAULT_LEVELS: Level[] = ["Easy", "Easy", "Intermediate", "Intermediate", "Advanced"];
+
+type Plan = { app: string; level: Level }[];
+type GenOptions = { apps: string[]; levels: Level[]; count: number; topic: string };
+
+const shuffle = <T,>(a: T[]) => [...a].sort(() => Math.random() - 0.5);
+
+/** Susun urutan aplikasi & tingkat per materi sesuai pilihan admin (kosong = gabungan/acak) */
+function makePlan(o: GenOptions): Plan {
+  const apps = o.apps.length ? shuffle(o.apps) : shuffle(APPS);
+  const appSeq = Array.from({ length: o.count }, (_, i) => apps[i % apps.length]);
+  let levels: Level[];
+  if (o.levels.length) {
+    const sorted = LEVEL_NAMES.filter((l) => o.levels.includes(l));
+    levels = Array.from({ length: o.count }, (_, i) => sorted[Math.floor((i * sorted.length) / o.count)]);
+  } else {
+    levels = o.count === 5 ? DEFAULT_LEVELS : Array.from({ length: o.count }, (_, i) => LEVEL_NAMES[Math.min(2, Math.floor((i * 3) / o.count))]);
+  }
+  return appSeq.map((app, i) => ({ app, level: levels[i] }));
+}
+
+function parseOptions(body: Record<string, unknown>): GenOptions {
+  const apps = Array.isArray(body.apps) ? (body.apps as unknown[]).map(String).filter((a) => APPS.includes(a)) : [];
+  const levels = Array.isArray(body.levels) ? (body.levels as unknown[]).map(String).filter((l): l is Level => (LEVEL_NAMES as readonly string[]).includes(l)) : [];
+  const count = Math.min(5, Math.max(1, Number(body.count) || 5));
+  const topic = String(body.topic ?? "").trim().slice(0, 200);
+  return { apps: [...new Set(apps)], levels: [...new Set(levels)], count, topic };
+}
 
 type Material = {
   title: string;
@@ -25,17 +55,17 @@ type Material = {
   videos?: Video[];
   videos_checked_at?: string;
 };
+type Pin = { id: string; url: string };
 type Video = { id: string; title: string; channel: string; thumbnail: string };
 
-function buildPrompt(recentTitles: string[], apps: string[]) {
+function buildPrompt(recentTitles: string[], plan: Plan, topic: string) {
   return `Kamu adalah mentor desain grafis untuk "Credible Story", tim kreator konten story WhatsApp/Instagram (rasio 9:16) bernuansa edukasi Islami & pengembangan diri. Anggotanya beragam: pemula sampai mahir.
 
-TUGAS: Lakukan riset web terbaru (tren desain story/poster vertikal, tutorial resmi aplikasi, dan inspirasi Pinterest), lalu susun TEPAT 5 materi belajar baru.
+TUGAS: Lakukan riset web terbaru (tren desain story/poster vertikal, tutorial resmi aplikasi, dan inspirasi Pinterest), lalu susun TEPAT ${plan.length} materi belajar baru.
 
-Aturan komposisi:
-- Aplikasi per materi (urut): ${apps.join(", ")}
-- Level per materi (urut): ${LEVELS.join(", ")}
-- Jangan mengulang topik ini: ${recentTitles.length ? recentTitles.join("; ") : "(belum ada)"}
+Aturan komposisi (WAJIB diikuti persis, urut):
+${plan.map((p, i) => `${i + 1}. Aplikasi: ${p.app} · Level: ${p.level}`).join("\n")}
+${topic ? `- Fokus/topik yang diminta admin: "${topic}". Semua materi harus relevan dengan topik ini, namun tetap berbeda satu sama lain.\n` : ""}- Jangan mengulang topik ini: ${recentTitles.length ? recentTitles.join("; ") : "(belum ada)"}
 
 Aturan isi tiap materi:
 - Bahasa Indonesia yang sangat mudah dipahami, ramah pemula, kalimat pendek.
@@ -45,7 +75,7 @@ Aturan isi tiap materi:
 - "youtube_query": kata kunci pencarian YouTube (3-7 kata, boleh campur Indonesia/Inggris) yang PALING mungkin menemukan video tutorial bagus untuk materi ini. Wajib sebut nama aplikasinya, mis. "tutorial canva teks melengkung story instagram".
 - Konten sopan dan sesuai adab; hindari gambar makhluk bernyawa sebagai fokus utama bila memungkinkan.
 
-KELUARKAN HANYA JSON array (tanpa teks lain, tanpa code fence) dengan 5 objek berkunci persis:
+KELUARKAN HANYA JSON array (tanpa teks lain, tanpa code fence) dengan ${plan.length} objek berkunci persis:
 title, design_app, difficulty_level, summary, tutorial_markdown, pinterest_moodboard, challenge_task, youtube_query`;
 }
 
@@ -58,7 +88,7 @@ function extractJsonArray(text: string): unknown {
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-function validate(items: unknown): Material[] {
+function validate(items: unknown, plan: Plan): Material[] {
   if (!Array.isArray(items)) throw new Error("Format materi tidak valid");
   const out: Material[] = [];
   for (const it of items as Record<string, unknown>[]) {
@@ -84,8 +114,10 @@ function validate(items: unknown): Material[] {
       youtube_query: (String(it.youtube_query ?? "").trim() || `tutorial ${it.design_app ?? ""} ${it.title}`).slice(0, 120),
     });
   }
-  if (out.length < 3) throw new Error(`Hanya ${out.length} materi valid dari AI`);
-  return out.slice(0, 5);
+  const need = Math.min(3, plan.length);
+  if (out.length < need) throw new Error(`Hanya ${out.length} materi valid dari AI`);
+  // Pastikan aplikasi & tingkat sesuai pilihan admin
+  return out.slice(0, plan.length).map((m, i) => ({ ...m, design_app: plan[i].app, difficulty_level: plan[i].level }));
 }
 
 // ---- YouTube Data API v3 (gratis 10.000 unit/hari; 1 pencarian = 100 unit) ----
@@ -130,6 +162,90 @@ async function backfillVideos(admin: any, ytKey: string, opts: { force?: boolean
     }
   }
   return { checked: rows?.length ?? 0, filled, error };
+}
+
+// ---- Referensi visual Pinterest ----
+// Pin dicari lewat Google Search (grounding Gemini / web search Claude), lalu ditampilkan di aplikasi
+// memakai embed resmi Pinterest. Server tidak mengambil data langsung dari Pinterest.
+const PIN_RE = /https?:\/\/(?:[a-z]{2,3}\.)?(?:www\.)?pinterest\.[a-z.]+\/pin\/(\d{6,25})/gi;
+
+function pinsFromText(text: string): string[] {
+  const ids: string[] = [];
+  for (const m of text.matchAll(PIN_RE)) ids.push(m[1]);
+  return ids;
+}
+
+async function resolveRedirect(uri: string): Promise<string | null> {
+  try {
+    const r = await fetch(uri, { redirect: "manual" });
+    return r.headers.get("location");
+  } catch {
+    return null;
+  }
+}
+
+function pinPrompt(m: { title: string; design_app: string; summary?: string | null; pinterest_moodboard?: { title: string }[] }) {
+  const keys = (m.pinterest_moodboard ?? []).map((x) => x.title).filter(Boolean).join("; ");
+  return `Gunakan Google Search untuk menemukan pin Pinterest yang BENAR-BENAR ada, berisi contoh desain visual yang cocok sebagai referensi materi ini:
+Judul materi: ${m.title}
+Aplikasi: ${m.design_app}
+Ringkasan: ${m.summary ?? "-"}
+Kata kunci gaya: ${keys || m.title}
+
+Cari dengan kueri seperti: site:pinterest.com/pin ${keys.split(";")[0] || m.title} story design.
+Utamakan desain poster/story vertikal (9:16), tipografi, atau layout — hindari foto wajah/makhluk bernyawa sebagai fokus.
+Tulis HANYA daftar URL pin (format https://www.pinterest.com/pin/ANGKA/), satu per baris, 4 sampai 8 URL. Jangan mengarang URL.`;
+}
+
+async function findPins(keys: { gemini?: string; claude?: string }, m: Parameters<typeof pinPrompt>[0]): Promise<Pin[]> {
+  const ids: string[] = [];
+  if (keys.gemini) {
+    const model = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${keys.gemini}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: pinPrompt(m) }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.3, maxOutputTokens: 2000 } }),
+    });
+    if (!res.ok) throw new Error(`Gemini pins ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const data = await res.json();
+    const cand = data.candidates?.[0];
+    // 1) URL asli dari hasil Google Search (paling tepercaya)
+    const chunks = (cand?.groundingMetadata?.groundingChunks ?? []) as { web?: { uri: string; title?: string } }[];
+    for (const c of chunks.slice(0, 15)) {
+      if (!c.web?.uri) continue;
+      if (c.web.title && !/pinterest/i.test(c.web.title)) continue;
+      const loc = /pinterest\./i.test(c.web.uri) ? c.web.uri : await resolveRedirect(c.web.uri);
+      if (loc) ids.push(...pinsFromText(loc));
+    }
+    // 2) URL yang ditulis model (hanya bila pencarian benar-benar dipakai)
+    const text = (cand?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
+    if (chunks.length) ids.push(...pinsFromText(text));
+  } else if (keys.claude) {
+    const r = await callClaude(keys.claude, pinPrompt(m));
+    for (const src of r.sources) ids.push(...pinsFromText(src.url));
+    if (r.sources.length) ids.push(...pinsFromText(r.text));
+  }
+  return [...new Set(ids)].slice(0, 6).map((id) => ({ id, url: `https://www.pinterest.com/pin/${id}/` }));
+}
+
+/** Lengkapi pin untuk materi yang belum dicek (atau satu materi tertentu) */
+// deno-lint-ignore no-explicit-any
+async function backfillPins(admin: any, keys: { gemini?: string; claude?: string }, opts: { limit?: number; id?: string } = {}) {
+  let q = admin.from("learning_materials").select("id,title,design_app,summary,pinterest_moodboard").order("created_at", { ascending: false }).limit(opts.limit ?? 5);
+  q = opts.id ? q.eq("id", opts.id) : q.is("pins_checked_at", null);
+  const { data: rows } = await q;
+  let filled = 0;
+  for (const [i, r] of (rows ?? []).entries()) {
+    if (i) await new Promise((ok) => setTimeout(ok, 6500)); // jaga batas 10 permintaan/menit Gemini gratis
+    try {
+      const pins = await findPins(keys, r);
+      await admin.from("learning_materials").update({ pins, pins_checked_at: new Date().toISOString() }).eq("id", r.id);
+      if (pins.length) filled++;
+    } catch {
+      break; // kemungkinan kuota habis — dilanjutkan otomatis di jadwal berikutnya
+    }
+  }
+  return { checked: rows?.length ?? 0, filled };
 }
 
 async function geminiOnce(key: string, model: string, prompt: string, withSearch: boolean) {
@@ -221,7 +337,16 @@ Deno.serve(async (req) => {
   const geminiKey = Deno.env.get("GEMINI_API_KEY");
   const claudeKey = Deno.env.get("ANTHROPIC_API_KEY");
   const ytKey = Deno.env.get("YOUTUBE_API_KEY");
-  const body = await req.json().catch(() => ({})) as { action?: string; force?: boolean };
+  const body = await req.json().catch(() => ({})) as { action?: string; force?: boolean; id?: string } & Record<string, unknown>;
+  const aiKeys = { gemini: geminiKey ?? undefined, claude: claudeKey ?? undefined };
+
+  // Admin: cari gambar referensi Pinterest (latar belakang; hasil muncul otomatis via realtime)
+  if (body.action === "pins") {
+    if (!geminiKey && !claudeKey) return json({ error: "API key AI belum diatur (GEMINI_API_KEY atau ANTHROPIC_API_KEY)." }, 400);
+    // @ts-ignore EdgeRuntime tersedia di Supabase Edge Runtime
+    EdgeRuntime.waitUntil(backfillPins(admin, aiKeys, body.id ? { id: String(body.id) } : { limit: 6 }));
+    return json({ started: true }, 202);
+  }
 
   // Admin: cari ulang video YouTube untuk materi
   if (body.action === "videos") {
@@ -234,6 +359,8 @@ Deno.serve(async (req) => {
   // Cron: lengkapi video materi lama yang belum dicek (mis. setelah API key baru ditambahkan)
   // @ts-ignore EdgeRuntime tersedia di Supabase Edge Runtime
   if (trigger === "cron" && ytKey) EdgeRuntime.waitUntil(backfillVideos(admin, ytKey, { limit: 10 }));
+  // @ts-ignore EdgeRuntime tersedia di Supabase Edge Runtime
+  if (trigger === "cron" && (geminiKey || claudeKey)) EdgeRuntime.waitUntil(backfillPins(admin, aiKeys, { limit: 3 }));
 
   // Cron: lewati bila batch terakhir < 40 jam
   if (trigger === "cron") {
@@ -257,15 +384,17 @@ Deno.serve(async (req) => {
     .eq("status", "running").gte("started_at", new Date(Date.now() - 5 * 60 * 1000).toISOString()).limit(1);
   if (running?.length) return json({ error: "Proses generate lain sedang berjalan. Tunggu beberapa menit." }, 409);
 
-  const { data: run } = await admin.from("learning_generation_runs").insert({ trigger, status: "running" }).select("id").single();
+  const opts = trigger === "manual" ? parseOptions(body) : { apps: [], levels: [] as Level[], count: 5, topic: "" };
+  const plan = makePlan(opts);
+  const optLabel = [opts.apps.length ? opts.apps.join("/") : "semua aplikasi", opts.levels.length ? opts.levels.join("/") : "campuran level", `${opts.count} materi`, opts.topic ? `topik "${opts.topic}"` : ""].filter(Boolean).join(" · ");
+  const { data: run } = await admin.from("learning_generation_runs").insert({ trigger, status: "running", message: optLabel }).select("id").single();
 
   const work = async () => {
     try {
       const { data: recent } = await admin.from("learning_materials").select("title").order("created_at", { ascending: false }).limit(40);
-      const shuffled = [...APPS].sort(() => Math.random() - 0.5).slice(0, 5);
-      const prompt = buildPrompt((recent ?? []).map((r) => r.title), shuffled);
+      const prompt = buildPrompt((recent ?? []).map((r) => r.title), plan, opts.topic);
       const result = geminiKey ? await callGemini(geminiKey, prompt) : await callClaude(claudeKey!, prompt);
-      const items = validate(extractJsonArray(result.text));
+      const items = validate(extractJsonArray(result.text), plan);
       if (ytKey) {
         for (const it of items) {
           try {
@@ -275,13 +404,21 @@ Deno.serve(async (req) => {
         }
       }
       const batchDate = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-      const { error } = await admin.from("learning_materials").insert(items.map((it) => ({
+      const { data: inserted, error } = await admin.from("learning_materials").insert(items.map((it) => ({
         ...it, videos_checked_at: it.videos_checked_at ?? null, batch_date: batchDate, sources: result.sources, generated_by: result.engine,
-      })));
+      }))).select("id");
       if (error) throw error;
       await admin.from("learning_generation_runs").update({
-        status: "success", materials_created: items.length, message: result.engine, finished_at: new Date().toISOString(),
+        status: "success", materials_created: items.length, message: `${result.engine} · ${optLabel}`, finished_at: new Date().toISOString(),
       }).eq("id", run!.id);
+      // Gambar referensi Pinterest per materi (bila waktu habis, sisanya dilengkapi cron berikutnya)
+      for (const [i, row] of (inserted ?? []).entries()) {
+        if (i) await new Promise((ok) => setTimeout(ok, 6500));
+        try {
+          const pins = await findPins(aiKeys, items[i]);
+          await admin.from("learning_materials").update({ pins, pins_checked_at: new Date().toISOString() }).eq("id", row.id);
+        } catch { break; }
+      }
     } catch (e) {
       await admin.from("learning_generation_runs").update({
         status: "error", message: String((e as Error).message ?? e).slice(0, 500), finished_at: new Date().toISOString(),

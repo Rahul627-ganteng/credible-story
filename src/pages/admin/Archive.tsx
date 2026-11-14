@@ -1,12 +1,14 @@
-import { Eye, EyeOff, ImagePlus, Pencil, Search, Trash2, Upload, X } from "lucide-react";
+import { Copy as CopyIcon, Eye, EyeOff, ImagePlus, Layers, Pencil, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { Empty, Field, Modal, PageLoader, Spinner, Stat, useToast } from "../../components/ui";
 import { must, previewUrl, useLive } from "../../lib/hooks";
-import { compressStory, titleFromFilename } from "../../lib/image";
+import { compressStory } from "../../lib/image";
+import { DUP_IDENTICAL, DUP_SIMILAR, clusters, findDuplicate, hamming, imageHash } from "../../lib/phash";
 import { emojiFor, fmtDate, monthLabel, todayJakarta } from "../../lib/rundown";
 import { errMsg, supabase } from "../../lib/supabase";
 import { DESIGN_APPS, type ArchiveItem, type Category, type Member } from "../../lib/types";
+import { autoResolve, backfillHashes, displayUrl, loadDupRows, pickKeeper, type DupRow } from "./dedupe";
 
 type MemberLite = Pick<Member, "id" | "name" | "category" | "is_active" | "role">;
 const TEAM = "Tim Credible Story";
@@ -47,17 +49,23 @@ function CreatorPicker({ members, value, onChange }: {
   );
 }
 
-interface Draft { key: string; file: File; preview: string; title: string; date: string }
+interface Draft {
+  key: string; file: File; preview: string; date: string;
+  hash?: string | null;
+  /** Karya yang identik dengan file ini (sudah ada di arsip/galeri, atau file lain di antrean) */
+  dup?: { label: string; dist: number } | null;
+  skip?: boolean;
+}
 
 export default function Archive() {
   const { member: me } = useAuth();
   const toast = useToast();
   const { data, loading, reload } = useLive(async () => {
     const [a, m] = await Promise.all([
-      supabase.from("story_submissions").select("id,member_id,member_name,category,period_month,title,submission_mode,file_url,design_app,wa_channel_link,is_published_to_showcase,published_at,is_archive,created_at").eq("is_archive", true).order("published_at", { ascending: false, nullsFirst: true }),
+      supabase.from("story_submissions").select("id,member_id,member_name,category,period_month,title,submission_mode,file_url,final_url,design_app,wa_channel_link,is_published_to_showcase,published_at,is_archive,created_at,image_hash,duplicate_of,dup_ignore").eq("is_archive", true).order("published_at", { ascending: false, nullsFirst: true }),
       supabase.from("members").select("id,name,category,is_active,role").eq("role", "member").order("name"),
     ]);
-    return { items: must(a) as ArchiveItem[], members: must(m) as MemberLite[] };
+    return { items: must(a) as ArchiveItem[], members: must(m) as MemberLite[], all: await loadDupRows() };
   }, [], ["story_submissions"]);
 
   // ---------- unggah massal ----------
@@ -65,22 +73,45 @@ export default function Archive() {
   const [batch, setBatch] = useState({ memberId: null as string | null, name: TEAM, category: "" as Category | "", app: "", wa: "", publish: true });
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
-  const addFiles = (list: FileList | null) => {
+  const labelOf = (r: Pick<DupRow, "member_name" | "published_at" | "is_archive">) =>
+    `${r.member_name || TEAM}${r.published_at ? ` · ${fmtDate(isoDate(r.published_at))}` : ""}${r.is_archive ? "" : " · setoran"}`;
+  const addFiles = async (list: FileList | null) => {
     if (!list) return;
-    const next = Array.from(list).filter((f) => /^image\//.test(f.type)).map((f) => ({
+    const fresh: Draft[] = Array.from(list).filter((f) => /^image\//.test(f.type)).map((f) => ({
       key: `${f.name}-${f.size}-${f.lastModified}`, file: f, preview: URL.createObjectURL(f),
-      title: titleFromFilename(f.name) || "Tanpa judul", date: localDate(f.lastModified || Date.now()),
+      date: localDate(f.lastModified || Date.now()), hash: undefined,
     }));
-    setDrafts((cur) => [...cur, ...next.filter((n) => !cur.some((c) => c.key === n.key))].slice(0, 60));
+    const next = fresh.filter((n) => !drafts.some((c) => c.key === n.key));
+    setDrafts((cur) => [...cur, ...next].slice(0, 60));
+    // Sidik gambar: tandai file yang sudah pernah terbit / dobel di antrean
+    const known: DupRow[] = (data?.all ?? []).filter((r: DupRow) => r.image_hash && !r.duplicate_of);
+    const seen: { hash: string; key: string }[] = drafts.filter((d) => d.hash).map((d) => ({ hash: d.hash!, key: d.key }));
+    for (const d of next) {
+      let hash: string | null = null;
+      try { hash = await imageHash(d.file); } catch { /* lewati */ }
+      let dup: Draft["dup"] = null;
+      if (hash) {
+        const hit = findDuplicate(hash, known, DUP_IDENTICAL);
+        if (hit) dup = { label: `Sudah ada: ${labelOf(hit.item)}`, dist: hit.dist };
+        else {
+          const twin = seen.find((x) => hamming(hash!, x.hash) <= DUP_IDENTICAL);
+          if (twin) dup = { label: "Dobel dengan file lain di antrean ini", dist: 0 };
+        }
+        seen.push({ hash, key: d.key });
+      }
+      setDrafts((cur) => cur.map((x) => (x.key === d.key ? { ...x, hash, dup, skip: !!dup } : x)));
+    }
   };
 
+  const queue = drafts.filter((d) => !d.skip);
+  const skipped = drafts.length - queue.length;
   const uploadAll = async () => {
-    if (!me || !drafts.length) return;
+    if (!me || !queue.length) return;
     if (!batch.memberId && !batch.name.trim()) return toast("Isi nama kreator", "err");
-    setProgress({ done: 0, total: drafts.length });
+    setProgress({ done: 0, total: queue.length });
     let ok = 0;
     const failed: Draft[] = [];
-    for (const d of drafts) {
+    for (const d of queue) {
       try {
         const up = await compressStory(d.file);
         const ext = up.name.split(".").pop() || "webp";
@@ -91,7 +122,7 @@ export default function Archive() {
         const { error } = await supabase.from("story_submissions").insert({
           is_archive: true, member_id: batch.memberId, member_name: batch.memberId ? null : batch.name.trim(),
           category: batch.memberId ? null : batch.category || null, period_month: d.date.slice(0, 7),
-          story_target: null, title: d.title.trim() || null, submission_mode: "file", file_url: url,
+          story_target: null, title: null, submission_mode: "file", file_url: url, image_hash: d.hash ?? null,
           design_app: batch.app || null, wa_channel_link: batch.wa.trim() || null, qc_status: "acc",
           is_published_to_showcase: batch.publish, published_at: batch.publish ? pubInstant(d.date) : null,
         });
@@ -105,7 +136,7 @@ export default function Archive() {
     }
     setProgress(null);
     setDrafts(failed);
-    toast(`${ok} story arsip berhasil diunggah${batch.publish ? " & tampil di galeri" : ""}`);
+    toast(`${ok} story arsip berhasil diunggah${batch.publish ? " & tampil di galeri" : ""}${skipped ? ` · ${skipped} duplikat dilewati` : ""}`);
     reload();
   };
 
@@ -113,22 +144,24 @@ export default function Archive() {
   const [q, setQ] = useState("");
   const [month, setMonth] = useState("");
   const [onlyTeam, setOnlyTeam] = useState(false);
+  const [onlyDup, setOnlyDup] = useState(false);
   const [edit, setEdit] = useState<ArchiveItem | null>(null);
   const items = data?.items ?? [];
   const months = useMemo(() => [...new Set(items.map((i) => i.period_month))].sort().reverse(), [items]);
   const list = items.filter((i) => (!month || i.period_month === month) && (!onlyTeam || (!i.member_id && (i.member_name ?? TEAM) === TEAM)) &&
-    (!q || `${i.title} ${i.member_name}`.toLowerCase().includes(q.toLowerCase())));
+    (!onlyDup || !!i.duplicate_of) && (!q || `${i.member_name ?? TEAM}`.toLowerCase().includes(q.toLowerCase())));
   const today = todayJakarta();
 
   if (loading || !data) return <PageLoader />;
   const unattributed = items.filter((i) => !i.member_id && (i.member_name ?? TEAM) === TEAM).length;
+  const dupCount = items.filter((i) => i.duplicate_of).length;
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Karya arsip" value={items.length} sub={`${months.length} bulan`} />
         <Stat label="Tampil di galeri" value={items.filter((i) => i.is_published_to_showcase).length} />
-        <Stat label="Tertaut ke member" value={items.filter((i) => i.member_id).length} />
+        <Stat label="Duplikat disembunyikan" value={dupCount} sub="story identik / menumpuk" />
         <Stat label="Kreator belum diisi" value={unattributed} sub="masih “Tim Credible Story”" accent={unattributed > 0} />
       </div>
 
@@ -137,7 +170,7 @@ export default function Archive() {
         <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
           <div>
             <p className="font-display text-lg font-bold text-ink">Unggah story yang sudah pernah terbit</p>
-            <p className="text-sm text-ink-muted">Pilih banyak gambar sekaligus (maks. 60). Gambar dikompres otomatis; judul diambil dari nama file dan tanggal dari tanggal file — semuanya bisa diubah sebelum diunggah.</p>
+            <p className="text-sm text-ink-muted">Pilih banyak gambar sekaligus (maks. 60). Gambar dikompres otomatis dan tanggal terbit diambil dari tanggal file (bisa diubah). Story yang sudah pernah diunggah terdeteksi otomatis dan dilewati.</p>
           </div>
         </div>
         <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-ink-muted transition hover:border-crimson-500 hover:text-crimson-700"
@@ -164,11 +197,20 @@ export default function Archive() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {drafts.map((d, i) => (
-                <div key={d.key} className="flex gap-3 rounded-xl border border-slate-200 p-2.5">
+                <div key={d.key} className={`flex gap-3 rounded-xl border p-2.5 ${d.dup ? (d.skip ? "border-amber-300 bg-amber-50/60 opacity-75" : "border-amber-300 bg-amber-50/60") : "border-slate-200"}`}>
                   <img src={d.preview} alt="" className="h-28 w-16 shrink-0 rounded-lg object-cover ring-1 ring-slate-200" />
                   <div className="min-w-0 flex-1 space-y-1.5">
-                    <input className="input py-1.5 text-sm" value={d.title} onChange={(e) => setDrafts(drafts.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} placeholder="Judul" />
-                    <input type="date" className="input py-1.5 font-mono text-xs" value={d.date} onChange={(e) => setDrafts(drafts.map((x, j) => (j === i ? { ...x, date: e.target.value || x.date } : x)))} />
+                    <label className="block text-[11px] font-semibold text-ink-muted">Tanggal terbit
+                      <input type="date" className="input mt-0.5 py-1.5 font-mono text-xs" value={d.date} onChange={(e) => setDrafts(drafts.map((x, j) => (j === i ? { ...x, date: e.target.value || x.date } : x)))} />
+                    </label>
+                    {d.hash === undefined && <p className="flex items-center gap-1 text-[11px] text-ink-muted"><Spinner className="h-3 w-3" /> Memeriksa duplikat…</p>}
+                    {d.dup && (
+                      <div className="rounded-lg bg-amber-100/70 px-2 py-1 text-[11px] text-amber-900">
+                        <p className="flex items-center gap-1 font-semibold"><CopyIcon className="h-3 w-3" /> Identik — {d.skip ? "dilewati" : "tetap diunggah"}</p>
+                        <p className="truncate">{d.dup.label}</p>
+                        <button className="font-semibold underline" onClick={() => setDrafts(drafts.map((x, j) => (j === i ? { ...x, skip: !x.skip } : x)))}>{d.skip ? "Tetap unggah" : "Lewati"}</button>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between text-[11px] text-ink-muted">
                       <span className="truncate">{(d.file.size / 1024 / 1024).toFixed(1)} MB · {d.date === today ? "terbit hari ini" : d.date > today ? "terjadwal" : monthLabel(d.date.slice(0, 7))}</span>
                       <button className="rounded p-0.5 hover:bg-slate-100 hover:text-crimson-700" onClick={() => setDrafts(drafts.filter((_, j) => j !== i))} aria-label="Buang"><X className="h-3.5 w-3.5" /></button>
@@ -181,8 +223,8 @@ export default function Archive() {
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-crimson-600" checked={batch.publish} onChange={(e) => setBatch({ ...batch, publish: e.target.checked })} /> Langsung tampilkan di galeri publik</label>
               <div className="flex gap-2">
                 <button className="btn-ghost" onClick={() => setDrafts([])} disabled={!!progress}>Batal</button>
-                <button className="btn-primary" onClick={uploadAll} disabled={!!progress}>
-                  {progress ? <><Spinner /> Mengunggah {progress.done}/{progress.total}…</> : <><Upload className="h-4 w-4" /> Unggah {drafts.length} story</>}
+                <button className="btn-primary" onClick={uploadAll} disabled={!!progress || !queue.length || drafts.some((d) => d.hash === undefined)}>
+                  {progress ? <><Spinner /> Mengunggah {progress.done}/{progress.total}…</> : <><Upload className="h-4 w-4" /> Unggah {queue.length} story{skipped ? ` · lewati ${skipped} duplikat` : ""}</>}
                 </button>
               </div>
             </div>
@@ -190,32 +232,36 @@ export default function Archive() {
         )}
       </div>
 
+      <DuplicatePanel rows={data.all} onChanged={reload} />
+
       {/* Kelola arsip */}
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input className="input pl-9" placeholder="Cari judul atau kreator…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className="input pl-9" placeholder="Cari nama kreator…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <select className="input w-auto" value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Bulan">
             <option value="">Semua bulan</option>
             {months.map((m) => <option key={m} value={m}>{emojiFor(m)} {monthLabel(m)}</option>)}
           </select>
           <button className={onlyTeam ? "btn-dark" : "btn-ghost"} onClick={() => setOnlyTeam(!onlyTeam)}>Kreator belum diisi ({unattributed})</button>
+          {dupCount > 0 && <button className={onlyDup ? "btn-dark" : "btn-ghost"} onClick={() => setOnlyDup(!onlyDup)}>Duplikat ({dupCount})</button>}
         </div>
         {list.length === 0 ? <Empty title="Tidak ada karya arsip yang cocok" /> : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
             {list.map((it) => {
               const src = previewUrl(it.file_url, it.submission_mode);
               return (
-                <div key={it.id} className={`group ${it.is_published_to_showcase ? "" : "opacity-50"}`}>
+                <div key={it.id} className={`group ${it.is_published_to_showcase && !it.duplicate_of ? "" : "opacity-50"}`}>
                   <button className="relative block w-full overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200" style={{ aspectRatio: "9/16" }} onClick={() => setEdit(it)}>
                     {src && <img src={src} alt="" loading="lazy" className="h-full w-full object-cover" />}
                     <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-ink/70 py-1.5 text-xs font-semibold text-white opacity-0 transition group-hover:opacity-100"><Pencil className="h-3 w-3" /> Ubah</span>
-                    {!it.is_published_to_showcase && <span className="badge-dark absolute left-1.5 top-1.5">Disembunyikan</span>}
+                    {it.duplicate_of ? <span className="badge absolute left-1.5 top-1.5 border-amber-300 bg-amber-100 text-amber-900">Duplikat</span>
+                      : !it.is_published_to_showcase && <span className="badge-dark absolute left-1.5 top-1.5">Disembunyikan</span>}
                   </button>
-                  <p className="mt-1.5 line-clamp-1 text-xs font-semibold text-ink">{it.title || "Tanpa judul"}</p>
-                  <p className={`truncate text-[11px] ${!it.member_id && (it.member_name ?? TEAM) === TEAM ? "text-amber-700" : "text-ink-muted"}`}>{it.member_name || TEAM} · {it.published_at ? fmtDate(isoDate(it.published_at)) : "–"}</p>
+                  <p className={`mt-1.5 truncate text-xs font-semibold ${!it.member_id && (it.member_name ?? TEAM) === TEAM ? "text-amber-700" : "text-ink"}`}>{it.member_name || TEAM}</p>
+                  <p className="truncate text-[11px] text-ink-muted">{it.published_at ? `Terbit ${fmtDate(isoDate(it.published_at))}` : "Belum terbit"}</p>
                 </div>
               );
             })}
@@ -231,7 +277,6 @@ export default function Archive() {
 function EditArchive({ item, members, onClose, onDone }: { item: ArchiveItem; members: MemberLite[]; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [creator, setCreator] = useState({ memberId: item.member_id, name: item.member_name || TEAM, category: (item.category ?? "") as Category | "" });
-  const [title, setTitle] = useState(item.title ?? "");
   const [date, setDate] = useState(isoDate(item.published_at) || `${item.period_month}-01`);
   const [app, setApp] = useState(item.design_app ?? "");
   const [wa, setWa] = useState(item.wa_channel_link ?? "");
@@ -246,7 +291,7 @@ function EditArchive({ item, members, onClose, onDone }: { item: ArchiveItem; me
     const keepTime = item.published_at && isoDate(item.published_at) === date;
     const { error } = await supabase.from("story_submissions").update({
       member_id: creator.memberId, member_name: creator.memberId ? null : creator.name.trim(),
-      category: creator.memberId ? null : creator.category || null, title: title.trim() || null,
+      category: creator.memberId ? null : creator.category || null,
       period_month: date.slice(0, 7), design_app: app || null, wa_channel_link: wa.trim() || null,
       is_published_to_showcase: show, published_at: show ? (keepTime ? item.published_at : pubInstant(date)) : null,
     }).eq("id", item.id);
@@ -257,7 +302,7 @@ function EditArchive({ item, members, onClose, onDone }: { item: ArchiveItem; me
   };
 
   const remove = async () => {
-    if (!confirm(`Hapus permanen “${item.title || "karya ini"}” dari arsip? Tindakan ini tidak bisa dibatalkan.`)) return;
+    if (!confirm(`Hapus permanen karya ${item.member_name || TEAM} ini dari arsip? Tindakan ini tidak bisa dibatalkan.`)) return;
     setBusy(true);
     const { error } = await supabase.from("story_submissions").delete().eq("id", item.id);
     if (!error) {
@@ -282,18 +327,143 @@ function EditArchive({ item, members, onClose, onDone }: { item: ArchiveItem; me
           {src && <img src={src} alt="" className="h-full w-full object-contain" />}
         </div>
         <div className="space-y-3">
-          <Field label="Judul"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
           <Field label="Kreator"><CreatorPicker members={members} value={creator} onChange={setCreator} /></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Tanggal terbit" hint={`Masuk periode ${monthLabel(date.slice(0, 7))}`}><input type="date" className="input font-mono" value={date} onChange={(e) => setDate(e.target.value || date)} /></Field>
             <Field label="Aplikasi desain"><select className="input" value={app} onChange={(e) => setApp(e.target.value)}><option value="">—</option>{DESIGN_APPS.map((a) => <option key={a}>{a}</option>)}</select></Field>
           </div>
           <Field label="Link Channel WA (opsional)"><input className="input" value={wa} onChange={(e) => setWa(e.target.value)} placeholder="https://whatsapp.com/channel/…" /></Field>
+          {item.duplicate_of && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">Karya ini terdeteksi <b>identik</b> dengan karya lain, jadi tidak ditampilkan dua kali di galeri. Atur di panel <b>Duplikat &amp; story menumpuk</b>.</p>}
           <button type="button" className={show ? "btn-ghost" : "btn-dark"} onClick={() => setShow(!show)}>
             {show ? <><Eye className="h-4 w-4" /> Tampil di galeri — klik untuk sembunyikan</> : <><EyeOff className="h-4 w-4" /> Disembunyikan — klik untuk tampilkan</>}
           </button>
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** Panel deteksi story identik / menumpuk di arsip & galeri */
+function DuplicatePanel({ rows, onChanged }: { rows: DupRow[]; onChanged: () => void }) {
+  const toast = useToast();
+  const [scan, setScan] = useState<{ done: number; total: number } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [showSimilar, setShowSimilar] = useState(false);
+  const hashable = rows.filter((r) => r.submission_mode === "file" || r.final_url);
+  const missing = hashable.filter((r) => !r.image_hash).length;
+  const pool = rows.filter((r) => !r.dup_ignore && r.image_hash);
+  const identical = useMemo(() => clusters(pool, DUP_IDENTICAL), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const similar = useMemo(() => {
+    const ids = new Set(identical.flatMap((c) => c.items.map((i) => i.id)));
+    return clusters(pool.filter((r) => !ids.has(r.id)), DUP_SIMILAR);
+  }, [rows, identical]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rescan = async () => {
+    setScan({ done: 0, total: missing });
+    try {
+      const fresh = await loadDupRows();
+      await backfillHashes(fresh, (done, total) => setScan({ done, total }));
+      const hidden = await autoResolve(fresh);
+      toast(hidden ? `${hidden} story identik disembunyikan dari galeri` : "Pemindaian selesai — tidak ada duplikat baru");
+      onChanged();
+    } catch (e) {
+      toast(errMsg(e), "err");
+    } finally {
+      setScan(null);
+    }
+  };
+  const mark = async (key: string, patch: { id: string; of: string | null }[], ignore?: string[]) => {
+    setBusy(key);
+    try {
+      if (patch.length) { const { error } = await supabase.rpc("admin_mark_duplicates", { p: patch }); if (error) throw error; }
+      if (ignore?.length) { const { error } = await supabase.rpc("admin_ignore_duplicates", { p_ids: ignore }); if (error) throw error; }
+      onChanged();
+    } catch (e) {
+      toast(errMsg(e), "err");
+    } finally {
+      setBusy(null);
+    }
+  };
+  const keepThis = (items: DupRow[], keep: DupRow) => mark(keep.id, items.map((i) => ({ id: i.id, of: i.id === keep.id ? null : keep.id })));
+  const removeHidden = async (items: DupRow[]) => {
+    const victims = items.filter((i) => i.duplicate_of && i.is_archive);
+    if (!victims.length) return toast("Hanya duplikat dari arsip yang bisa dihapus dari sini", "info");
+    if (!confirm(`Hapus permanen ${victims.length} duplikat arsip? Yang tampil di galeri tetap ada. Tindakan ini tidak bisa dibatalkan.`)) return;
+    setBusy("del");
+    const { error } = await supabase.from("story_submissions").delete().in("id", victims.map((v) => v.id));
+    if (!error) {
+      const paths = victims.map((v) => v.file_url.match(/\/storage\/v1\/object\/public\/stories\/(.+)$/)?.[1]).filter(Boolean).map((p) => decodeURIComponent(p!));
+      if (paths.length) await supabase.storage.from("stories").remove(paths);
+    }
+    setBusy(null);
+    if (error) return toast(errMsg(error), "err");
+    toast(`${victims.length} duplikat dihapus`);
+    onChanged();
+  };
+
+  const Group = ({ items, kind }: { items: DupRow[]; kind: "identical" | "similar" }) => {
+    const keeper = items.find((i) => !i.duplicate_of && items.some((x) => x.duplicate_of === i.id)) ?? (kind === "identical" ? pickKeeper(items) : null);
+    const gid = items.map((i) => i.id).join(",");
+    return (
+      <div className={`rounded-2xl border p-3 ${kind === "identical" ? "border-amber-200 bg-amber-50/40" : "border-slate-200"}`}>
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+          {items.map((it) => {
+            const shown = !it.duplicate_of && it.is_published_to_showcase;
+            return (
+              <div key={it.id} className="w-[92px] shrink-0">
+                <div className={`relative overflow-hidden rounded-xl bg-slate-100 ring-2 ${keeper?.id === it.id ? "ring-emerald-500" : "ring-transparent"}`} style={{ aspectRatio: "9/16" }}>
+                  <img src={previewUrl(displayUrl(it), it.final_url ? "file" : it.submission_mode) ?? ""} alt="" loading="lazy" className={`h-full w-full object-cover ${shown ? "" : "opacity-60"}`} />
+                  <span className={`badge absolute left-1 top-1 text-[10px] ${shown ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-300 bg-white/90 text-ink-muted"}`}>{shown ? "Tampil" : it.duplicate_of ? "Disembunyikan" : "Tidak terbit"}</span>
+                </div>
+                <p className="mt-1 truncate text-[11px] font-semibold text-ink">{it.member_name || TEAM}</p>
+                <p className="truncate text-[10px] text-ink-muted">{it.published_at ? fmtDate(isoDate(it.published_at)) : "–"}{it.is_archive ? " · arsip" : " · setoran"}</p>
+                {keeper?.id !== it.id && <button className="mt-0.5 text-[10.5px] font-semibold text-crimson-700 hover:underline" disabled={!!busy} onClick={() => keepThis(items, it)}>Tampilkan yang ini</button>}
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {kind === "similar" && <button className="btn-soft btn-sm" disabled={!!busy} onClick={() => keepThis(items, pickKeeper(items))}>{busy === pickKeeper(items).id ? <Spinner /> : <Layers className="h-3.5 w-3.5" />} Ini story yang sama</button>}
+          <button className="btn-ghost btn-sm" disabled={!!busy} onClick={() => mark(gid, items.filter((i) => i.duplicate_of).map((i) => ({ id: i.id, of: null })), items.map((i) => i.id))}>{busy === gid ? <Spinner /> : null} Bukan duplikat</button>
+          {kind === "identical" && items.some((i) => i.duplicate_of && i.is_archive) && (
+            <button className="btn-ghost btn-sm text-crimson-700" disabled={!!busy} onClick={() => removeHidden(items)}><Trash2 className="h-3.5 w-3.5" /> Hapus duplikat arsip</button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="flex items-center gap-2 font-display text-lg font-bold text-ink"><Layers className="h-5 w-5 text-crimson-600" /> Duplikat &amp; story menumpuk</p>
+          <p className="text-sm text-ink-muted">
+            Setiap gambar diberi sidik visual, jadi story yang sama tetap terdeteksi walau beda format, ukuran, atau sudah diberi watermark.
+            Dari story yang identik, <b className="text-ink">hanya satu yang tampil di galeri</b>.
+          </p>
+          <p className="mt-1 text-xs text-ink-muted">{hashable.length - missing}/{hashable.length} karya sudah dipindai{missing ? ` · ${missing} menunggu` : ""}</p>
+        </div>
+        <button className="btn-ghost" onClick={rescan} disabled={!!scan}>
+          {scan ? <><Spinner /> Memindai {scan.done}/{scan.total}…</> : <><RefreshCw className="h-4 w-4" /> Pindai sekarang</>}
+        </button>
+      </div>
+      {identical.length === 0 && similar.length === 0 ? (
+        <p className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{missing ? "Belum ada duplikat dari karya yang sudah dipindai." : "Tidak ada story identik — galeri bersih ✨"}</p>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {identical.length > 0 && <p className="text-sm font-semibold text-ink">Identik ({identical.length} kelompok) <span className="font-normal text-ink-muted">· bingkai hijau = yang ditampilkan</span></p>}
+          <div className="grid gap-3 lg:grid-cols-2">{identical.map((c) => <Group key={c.items.map((i) => i.id).join()} items={c.items} kind="identical" />)}</div>
+          {similar.length > 0 && (
+            <div>
+              <button className="text-sm font-semibold text-ink-muted hover:text-ink" onClick={() => setShowSimilar(!showSimilar)}>
+                {showSimilar ? "Sembunyikan" : "Lihat"} {similar.length} kelompok yang mirip (perlu dicek manual) →
+              </button>
+              {showSimilar && <div className="mt-3 grid gap-3 lg:grid-cols-2">{similar.map((c) => <Group key={c.items.map((i) => i.id).join()} items={c.items} kind="similar" />)}</div>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

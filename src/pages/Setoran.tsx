@@ -7,6 +7,7 @@ import { Field, PageLoader, ProgressBar, QcBadge, SectionTitle, Spinner, useToas
 import { activePeriodOf, must, previewUrl, useLive, usePeriods } from "../lib/hooks";
 import { deadlinesOf, fmtDate, monthLabel, progressEmoji, quotaOf, storyNums } from "../lib/rundown";
 import { compressStory } from "../lib/image";
+import { imageHash } from "../lib/phash";
 import { errMsg, supabase } from "../lib/supabase";
 import { DESIGN_APPS, type Member, type Story } from "../lib/types";
 
@@ -72,9 +73,11 @@ export default function Setoran() {
     setBusy(true);
     try {
       let url = link.trim();
+      let hash: string | null = null;
       if (mode === "file") {
         if (!file) throw new Error("Pilih file gambar story terlebih dulu.");
         const up = await compressStory(file);
+        hash = await imageHash(up).catch(() => null);
         const ext = up.name.split(".").pop()?.toLowerCase() || "png";
         const path = `${member.id}/${period.period_month}/${target.id}-story${storyN}-${Date.now()}.${ext}`;
         const { error } = await supabase.storage.from("stories").upload(path, up, { contentType: up.type, cacheControl: "31536000" });
@@ -85,7 +88,7 @@ export default function Setoran() {
       }
       const { error } = await supabase.from("story_submissions").upsert({
         member_id: target.id, period_month: period.period_month, story_target: storyN,
-        submission_mode: mode, file_url: url, design_app: app, title: title.trim() || null,
+        submission_mode: mode, file_url: url, design_app: app, title: title.trim() || null, image_hash: hash,
         ...(isAdmin ? {} : { qc_status: "pending_qc" }),
       }, { onConflict: "member_id,period_month,story_target" });
       if (error) throw error;

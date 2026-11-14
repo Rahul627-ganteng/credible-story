@@ -69,6 +69,14 @@ export interface Story {
   final_url: string | null;
   final_uploaded_at: string | null;
   special_id: string | null;
+  /** Ditandai saat admin mengunduh (satuan/batch) — yang sudah diunduh tidak ikut batch berikutnya */
+  downloaded_at: string | null;
+  /** Ditandai manual oleh admin, atau otomatis saat versi final diunggah */
+  watermarked_at: string | null;
+  /** Sidik gambar (dHash 256-bit, hex) untuk mendeteksi story identik/menumpuk */
+  image_hash: string | null;
+  duplicate_of: string | null;
+  dup_ignore: boolean;
   design_app: string | null;
   qc_status: "pending_qc" | "revision" | "acc";
   qc_notes: string | null;
@@ -96,6 +104,10 @@ export interface ArchiveItem {
   published_at: string | null;
   is_archive: boolean;
   created_at: string;
+  final_url?: string | null;
+  image_hash: string | null;
+  duplicate_of: string | null;
+  dup_ignore: boolean;
 }
 
 export interface ShowcaseItem {
@@ -112,6 +124,7 @@ export interface ShowcaseItem {
   published_at: string | null;
   is_archive: boolean;
   is_special: boolean;
+  image_hash: string | null;
 }
 
 /** Credible Story Special Edition: 1 story khusus per momen, 1 PIC, dihitung 2 di rekap */
@@ -137,6 +150,8 @@ export interface PeriodFlag {
   /** Taqdim konsep dilakukan via WhatsApp; admin cukup menandai sudah/belum */
   taqdim_done: boolean;
   taqdim_marked_at: string | null;
+  /** Jumlah konsep reguler yang sudah ditaqdimkan (Special Edition PIC otomatis +2 di atasnya) */
+  taqdim_count: number;
   has_kabar: boolean;
   excuse_note: string | null;
   design_bareng: boolean;
@@ -165,7 +180,11 @@ export interface LearningMaterial {
   youtube_query: string | null;
   videos: YoutubeVideo[];
   videos_checked_at: string | null;
+  pins: PinterestPin[];
+  pins_checked_at: string | null;
 }
+
+export interface PinterestPin { id: string; url: string }
 
 export interface YoutubeVideo { id: string; title: string; channel: string; thumbnail: string }
 

@@ -188,6 +188,14 @@ export interface MemberProgress {
 /** Setoran reguler = bukan Special Edition */
 export const isRegular = (s: Pick<Story, "special_id">) => !s.special_id;
 
+/** Taqdim: konsep reguler yang sudah ditaqdimkan + 2 per Special Edition yang dipegang sebagai PIC */
+export function taqdimInfo(flag: { taqdim_count?: number | null; taqdim_done?: boolean } | undefined, specials: number, quota: number) {
+  const count = flag?.taqdim_count ?? 0;
+  const bonus = specials * 2;
+  const total = count + bonus;
+  return { count, specials, bonus, total, done: quota > 0 && total >= quota };
+}
+
 export function progressFor(memberId: string, stories: Story[], taqdimDone = false): MemberProgress {
   const all = stories.filter((x) => x.member_id === memberId);
   const s = all.filter(isRegular);

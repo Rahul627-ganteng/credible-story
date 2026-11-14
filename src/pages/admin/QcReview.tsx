@@ -20,7 +20,7 @@ export default function QcReview({ period }: { period: RundownPeriod | null }) {
     .sort((a, b) => (a.member_name ?? "").localeCompare(b.member_name ?? "") || (a.story_target ?? 99) - (b.story_target ?? 99));
   const counts = { pending_qc: 0, revision: 0, acc: 0 } as Record<string, number>;
   data.stories.forEach((s) => counts[s.qc_status]++);
-  const waiting = data.stories.filter((s) => pubStage(s) === "need_final").length;
+  const waiting = data.stories.filter((s) => ["need_final", "watermarked"].includes(pubStage(s))).length;
 
   return (
     <div className="space-y-4">

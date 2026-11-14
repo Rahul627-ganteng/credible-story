@@ -1,11 +1,12 @@
-import { AlertTriangle, CheckCircle2, Ghost, MessageCircle, Palette, Send, Siren } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Ghost, Send, Siren } from "lucide-react";
 import { useEffect, useState } from "react";
 import { PhaseBanner } from "../../components/Rundown";
-import { Empty, PageLoader, Spinner, useToast } from "../../components/ui";
+import { CopyButton, Empty, PageLoader, Spinner, useToast } from "../../components/ui";
+import { WaActions } from "../../components/WaActions";
 import { fmtDateTime, isLatePhase, pendingReason, phaseById, phaseList, phaseOf, progressFor, quotaOf } from "../../lib/rundown";
 import { errMsg, supabase } from "../../lib/supabase";
 import type { Member, RundownPeriod } from "../../lib/types";
-import { designBarengMessage, reminderMessage, waLink } from "../../lib/wa";
+import { designBarengMessage, reminderMessage } from "../../lib/wa";
 import { logReminder, upsertFlag, useAdminData } from "./data";
 
 
@@ -37,16 +38,8 @@ export default function Reminders({ period }: { period: RundownPeriod | null }) 
   const ghosts = late ? rows.filter((r) => r.pr.storiesSubmitted === 0 && !flagOf(r.m.id)?.has_kabar) : [];
   const alerts = rows.filter((r) => !ghosts.includes(r));
 
-  const send = async (m: Member, reason: string | null) => {
-    const link = waLink(data.phones[m.id], reminderMessage(phase, m.name, period, reason));
-    if (!link) return toast(`Nomor WA ${m.name} belum diisi (ubah di tab Member)`, "err");
-    window.open(link, "_blank");
-    await logReminder(m.id, pm, flagOf(m.id));
-  };
+  const logged = async (m: Member) => { await logReminder(m.id, pm, flagOf(m.id)); reload(); };
   const bareng = async (m: Member) => {
-    const link = waLink(data.phones[m.id], designBarengMessage(m.name));
-    if (!link) return toast(`Nomor WA ${m.name} belum diisi`, "err");
-    window.open(link, "_blank");
     await upsertFlag(m.id, pm, { design_bareng: true }).catch(() => undefined);
     reload();
   };
@@ -93,8 +86,8 @@ export default function Reminders({ period }: { period: RundownPeriod | null }) 
             <CheckCircle2 className="h-3.5 w-3.5" /> {f?.has_kabar ? "Sudah berkabar" : "Tandai berkabar"}
           </button>
           <button className="btn-ghost btn-sm" onClick={() => setExcuse(r.m)}>Keterangan</button>
-          {late && <button className={`btn-sm ${f?.design_bareng ? "btn-dark" : "btn-soft"}`} onClick={() => bareng(r.m)}><Palette className="h-3.5 w-3.5" /> Desain Bareng, AYO!</button>}
-          <button className="btn-primary btn-sm" onClick={() => send(r.m, r.reason)} disabled={!phone}><MessageCircle className="h-3.5 w-3.5" /> Kirim Pengingat WA</button>
+          {late && <WaActions phone={phone} message={designBarengMessage(r.m.name)} label={f?.design_bareng ? "Desain Bareng ✓" : "Desain Bareng, AYO!"} variant={f?.design_bareng ? "dark" : "soft"} copyLabel="Salin" onUse={() => bareng(r.m)} />}
+          <WaActions phone={phone} message={reminderMessage(phase, r.m.name, period, r.reason)} label="Kirim Pengingat WA" onUse={() => logged(r.m)} />
         </div>
       </div>
     );
@@ -122,6 +115,7 @@ export default function Reminders({ period }: { period: RundownPeriod | null }) 
 
       <details className="card p-4 text-sm">
         <summary className="cursor-pointer font-semibold text-ink">Pratinjau template pesan fase ini</summary>
+        <div className="mt-3 flex justify-end"><CopyButton text={reminderMessage(phase, "[Nama]", period, rows[0]?.reason)} label="Salin template" /></div>
         <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-slate-50 p-4 font-mono text-[12.5px] leading-relaxed text-ink">{reminderMessage(phase, "[Nama]", period, rows[0]?.reason)}</pre>
       </details>
 

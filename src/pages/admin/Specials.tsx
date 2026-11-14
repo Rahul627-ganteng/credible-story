@@ -1,4 +1,4 @@
-import { CalendarDays, CheckCircle2, MessageCircle, Pencil, Plus, Star, Trash2 } from "lucide-react";
+import { CalendarDays, CheckCircle2, Pencil, Plus, Star, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Empty, Field, Modal, PageLoader, Spinner, useToast } from "../../components/ui";
 import { must, previewUrl, useLive } from "../../lib/hooks";
@@ -6,7 +6,8 @@ import { specialStatus } from "../../lib/special";
 import { addDays, fmtDate, monthLabel, todayJakarta } from "../../lib/rundown";
 import { errMsg, supabase } from "../../lib/supabase";
 import { SPECIAL_WEIGHT, type Member, type SpecialEdition, type Story } from "../../lib/types";
-import { specialReminderMessage, waLink } from "../../lib/wa";
+import { specialReminderMessage } from "../../lib/wa";
+import { WaActions } from "../../components/WaActions";
 
 type Lite = Pick<Member, "id" | "name" | "category" | "is_active" | "role">;
 
@@ -33,12 +34,6 @@ export default function Specials() {
   const list = data.specials.filter((sp) => view === "all" || sp.publish_date >= addDays(today, -7));
   const pending = data.specials.filter((sp) => sp.publish_date >= today && !specialStatus(sp, subOf(sp.id)).sent).length;
 
-  const remind = (sp: SpecialEdition) => {
-    if (!sp.pic_member_id) return toast("Tentukan PIC dulu", "err");
-    const link = waLink(data.phones[sp.pic_member_id], specialReminderMessage(nameOf(sp.pic_member_id), sp));
-    if (!link) return toast(`Nomor WA ${nameOf(sp.pic_member_id)} belum diisi`, "err");
-    window.open(link, "_blank");
-  };
   const toggleSent = async (sp: SpecialEdition) => {
     const { error } = await supabase.from("special_editions").update({ marked_sent: !sp.marked_sent, updated_at: new Date().toISOString() }).eq("id", sp.id);
     if (error) toast(errMsg(error), "err"); else reload();
@@ -92,7 +87,7 @@ export default function Specials() {
                     <p className="text-xs text-ink-muted">👤 PIC: <b className="text-ink">{nameOf(sp.pic_member_id)}</b></p>
                     <span className={`${st.cls} mt-2`}>{st.sent && <CheckCircle2 className="h-3 w-3" />} {st.text}</span>
                     <div className="mt-2.5 flex flex-wrap gap-1.5">
-                      {!st.sent && <button className="btn-soft btn-sm" onClick={() => remind(sp)}><MessageCircle className="h-3.5 w-3.5" /> Ingatkan PIC</button>}
+                      {!st.sent && sp.pic_member_id && <WaActions phone={data.phones[sp.pic_member_id]} message={specialReminderMessage(nameOf(sp.pic_member_id), sp)} label="Ingatkan PIC" variant="soft" copyLabel="Salin" />}
                       {!sub && <button className="btn-ghost btn-sm" onClick={() => toggleSent(sp)}>{sp.marked_sent ? "Batalkan tanda terkirim" : "Tandai terkirim"}</button>}
                       <button className="btn-ghost btn-sm" onClick={() => setEdit(sp)}><Pencil className="h-3.5 w-3.5" /> Ubah</button>
                     </div>

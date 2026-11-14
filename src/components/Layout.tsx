@@ -5,6 +5,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { ADMIN_GROUPS } from "../pages/admin/sections";
 
 export function Logo({ compact = false, light = false }: { compact?: boolean; light?: boolean }) {
   return (
@@ -17,6 +18,11 @@ export function Logo({ compact = false, light = false }: { compact?: boolean; li
     </Link>
   );
 }
+
+const subLinkCls = ({ isActive }: { isActive: boolean }) =>
+  `flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition ${
+    isActive ? "bg-white text-crimson-700 shadow-sm ring-1 ring-slate-200" : "text-ink-body hover:bg-white/70 hover:text-ink"
+  }`;
 
 const linkCls = ({ isActive }: { isActive: boolean }) =>
   `inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
@@ -142,7 +148,6 @@ export function AppLayout() {
     { to: "/app/rekap", label: "Rekap WA", icon: <MessageSquareText className="h-4 w-4" /> },
     { to: "/", label: "Galeri Publik", icon: <GalleryVerticalEnd className="h-4 w-4" />, end: true },
   ];
-  if (isAdmin) items.splice(0, 0, { to: "/admin", label: "Admin Center", icon: <ShieldCheck className="h-4 w-4" /> });
 
   const tabs: { to: string; label: string; icon: ReactNode; end?: boolean }[] = isAdmin
     ? [
@@ -160,9 +165,29 @@ export function AppLayout() {
   useEffect(() => setOpen(false), [loc.pathname]);
 
   const nav = (
-    <nav className="flex flex-col gap-1">
+    <nav className="flex flex-col gap-1" aria-label="Menu">
+      {isAdmin && (
+        <div className="mb-3 space-y-3">
+          <p className="flex items-center gap-2 px-3 text-[11px] font-bold uppercase tracking-[0.14em] text-crimson-700"><ShieldCheck className="h-3.5 w-3.5" /> Admin Center</p>
+          {ADMIN_GROUPS.map((g) => (
+            <div key={g.title}>
+              <p className="px-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-ink-muted">{g.title}</p>
+              <div className="flex flex-col gap-0.5">
+                {g.items.map((i) => (
+                  <NavLink key={i.to} to={i.to} end={i.end} className={subLinkCls} onClick={() => setOpen(false)}>
+                    {i.icon}
+                    {i.label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="mx-3 border-t border-slate-200" />
+          <p className="px-3 text-[10.5px] font-semibold uppercase tracking-wide text-ink-muted">Portal anggota</p>
+        </div>
+      )}
       {items.map((i) => (
-        <NavLink key={i.to} to={i.to} end={i.end} className={linkCls} onClick={() => setOpen(false)}>
+        <NavLink key={i.to} to={i.to} end={i.end} className={isAdmin ? subLinkCls : linkCls} onClick={() => setOpen(false)}>
           {i.icon}
           {i.label}
         </NavLink>
@@ -172,13 +197,11 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[248px_1fr]">
-      <aside className="glass sticky top-0 hidden h-screen flex-col justify-between border-y-0 border-l-0 p-4 lg:flex">
-        <div>
-          <div className="mb-6 px-1">
-            <Logo />
-          </div>
-          {nav}
+      <aside className="glass sticky top-0 hidden h-screen flex-col gap-4 border-y-0 border-l-0 p-4 lg:flex">
+        <div className="shrink-0 px-1">
+          <Logo />
         </div>
+        <div className="scrollbar-thin -mx-2 min-h-0 flex-1 overflow-y-auto px-2">{nav}</div>
         <UserCard name={member?.name} sub={isAdmin ? "Super Admin" : `${member?.category ?? ""} · @${member?.username ?? ""}`} onOut={() => signOut()} />
       </aside>
 
