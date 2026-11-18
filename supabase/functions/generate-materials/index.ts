@@ -179,7 +179,7 @@ function pinsFromText(text: string): string[] {
 
 async function resolveRedirect(uri: string): Promise<string | null> {
   try {
-    const r = await fetch(uri, { redirect: "manual" });
+    const r = await fetch(uri, { redirect: "manual", signal: AbortSignal.timeout(5000) });
     return r.headers.get("location");
   } catch {
     return null;
@@ -205,6 +205,7 @@ async function findPins(keys: { gemini?: string; claude?: string }, m: Parameter
     const model = GEMINI_PRIMARY();
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${keys.gemini}`, {
       method: "POST",
+      signal: AbortSignal.timeout(25000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: pinPrompt(m) }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.3, maxOutputTokens: 2000 } }),
     });
@@ -213,7 +214,7 @@ async function findPins(keys: { gemini?: string; claude?: string }, m: Parameter
     const cand = data.candidates?.[0];
     // 1) URL asli dari hasil Google Search (paling tepercaya)
     const chunks = (cand?.groundingMetadata?.groundingChunks ?? []) as { web?: { uri: string; title?: string } }[];
-    for (const c of chunks.slice(0, 15)) {
+    for (const c of chunks.slice(0, 8)) {
       if (!c.web?.uri) continue;
       if (c.web.title && !/pinterest/i.test(c.web.title)) continue;
       const loc = /pinterest\./i.test(c.web.uri) ? c.web.uri : await resolveRedirect(c.web.uri);
@@ -250,14 +251,15 @@ async function backfillPins(admin: any, keys: { gemini?: string; claude?: string
   return { checked: rows?.length ?? 0, filled };
 }
 
-async function geminiOnce(key: string, model: string, prompt: string, withSearch: boolean) {
+async function geminiOnce(key: string, model: string, prompt: string, withSearch: boolean, timeoutMs = 90000) {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
     method: "POST",
+    signal: AbortSignal.timeout(timeoutMs),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       ...(withSearch ? { tools: [{ google_search: {} }] } : {}),
-      generationConfig: { temperature: 0.8, maxOutputTokens: 16000 },
+      generationConfig: { temperature: 0.8, maxOutputTokens: 8000 },
     }),
   });
   if (!res.ok) throw new Error(`Gemini ${model} ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -281,18 +283,22 @@ const GEMINI_FALLBACK = () => Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-3
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const busy = (e: unknown) => / (429|500|503|504):/.test(String((e as Error)?.message ?? e));
 
-async function callGemini(key: string, prompt: string) {
+async function callGemini(key: string, prompt: string, deadline = Date.now() + 115000) {
   const models = [...new Set([GEMINI_PRIMARY(), "gemini-3.8-flash", GEMINI_FALLBACK(), "gemini-3.5-flash"])];
   const plan: [string, boolean][] = [...models.map((m) => [m, true] as [string, boolean]), ...models.map((m) => [m, false] as [string, boolean])];
   const errors: string[] = [];
   for (const [model, search] of plan) {
     for (let attempt = 0; attempt < 3; attempt++) {
+      const left = deadline - Date.now();
+      if (left < 15000) throw new Error(`Waktu habis menunggu Gemini. ${errors.slice(-2).join(" | ")}`.slice(0, 480));
       try {
-        return await geminiOnce(key, model, prompt, search);
+        return await geminiOnce(key, model, prompt, search, Math.min(90000, left - 5000));
       } catch (e) {
-        errors.push((e as Error).message.slice(0, 160));
-        if (!busy(e)) break; // model tidak tersedia / format ditolak → coba kombinasi berikutnya
-        await sleep(4000 * (attempt + 1));
+        const msg = (e as Error).name === "TimeoutError" ? `Gemini ${model} timeout` : (e as Error).message;
+        errors.push(msg.slice(0, 160));
+        if (!busy(e) && (e as Error).name !== "TimeoutError") break; // model tidak tersedia → kombinasi berikutnya
+        if ((e as Error).name === "TimeoutError") break;
+        await sleep(3000 * (attempt + 1));
       }
     }
   }
@@ -324,6 +330,68 @@ async function callClaude(key: string, prompt: string) {
   return { text, sources: sources.slice(0, 12), engine: `claude:${model}` };
 }
 
+type StepJob = { run_id: string; plan: Plan; topic: string; index: number; label: string };
+type Keys = { geminiKey?: string; claudeKey?: string; ytKey?: string; aiKeys: { gemini?: string; claude?: string } };
+
+/** Panggil langkah berikutnya sebagai pemanggilan fungsi baru */
+async function kick(job: StepJob) {
+  const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/generate-materials`;
+  await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
+    body: JSON.stringify({ action: "step", ...job }),
+  });
+}
+
+// deno-lint-ignore no-explicit-any
+async function runStep(admin: any, job: StepJob, k: Keys) {
+  const started = Date.now();
+  const total = job.plan.length;
+  const progress = (done: number, extra = "") =>
+    admin.from("learning_generation_runs").update({ message: `${job.label} · ${done}/${total} selesai${extra}` }).eq("id", job.run_id);
+  try {
+    const { data: run } = await admin.from("learning_generation_runs").select("status,materials_created").eq("id", job.run_id).single();
+    if (!run || run.status !== "running") return;
+    const { data: recent } = await admin.from("learning_materials").select("title").order("created_at", { ascending: false }).limit(40);
+    const item = [job.plan[job.index]];
+    const prompt = buildPrompt((recent ?? []).map((r: { title: string }) => r.title), item, job.topic);
+    const result = k.geminiKey ? await callGemini(k.geminiKey, prompt, started + 110000) : await callClaude(k.claudeKey!, prompt);
+    const [m] = validate(extractJsonArray(result.text), item);
+    if (k.ytKey) {
+      try { m.videos = await searchYouTube(k.ytKey, m.youtube_query); m.videos_checked_at = new Date().toISOString(); } catch { /* cron melengkapi */ }
+    }
+    const batchDate = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+    const { data: ins, error } = await admin.from("learning_materials").insert({
+      ...m, videos_checked_at: m.videos_checked_at ?? null, batch_date: batchDate, sources: result.sources, generated_by: result.engine,
+    }).select("id").single();
+    if (error) throw error;
+    const done = (run.materials_created ?? 0) + 1;
+    await admin.from("learning_generation_runs").update({ materials_created: done }).eq("id", job.run_id);
+    if (Date.now() - started < 95000) {
+      try {
+        const pins = await findPins(k.aiKeys, m);
+        await admin.from("learning_materials").update({ pins, pins_checked_at: new Date().toISOString() }).eq("id", ins.id);
+      } catch { /* cron melengkapi */ }
+    }
+    if (job.index + 1 < total) {
+      await progress(done);
+      await kick({ ...job, index: job.index + 1 });
+    } else {
+      await admin.from("learning_generation_runs").update({
+        status: "success", message: `${result.engine} · ${job.label}`, finished_at: new Date().toISOString(),
+      }).eq("id", job.run_id);
+    }
+  } catch (e) {
+    const { data: run } = await admin.from("learning_generation_runs").select("materials_created").eq("id", job.run_id).single();
+    const done = run?.materials_created ?? 0;
+    await admin.from("learning_generation_runs").update({
+      status: done > 0 ? "success" : "error",
+      message: `${done > 0 ? `${done}/${total} materi berhasil, sisanya gagal: ` : ""}${String((e as Error).message ?? e)}`.slice(0, 500),
+      finished_at: new Date().toISOString(),
+    }).eq("id", job.run_id);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -334,8 +402,12 @@ Deno.serve(async (req) => {
 
   // ---- Otorisasi ----
   let trigger = "cron";
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
   const cronToken = req.headers.get("x-cron-token");
-  if (cronToken) {
+  if (bearer && bearer === serviceKey) {
+    trigger = "internal";
+  } else if (cronToken) {
     const { data } = await admin.rpc("verify_cron_token", { t: cronToken });
     if (data !== true) return json({ error: "Token cron tidak valid" }, 401);
   } else {
@@ -352,6 +424,14 @@ Deno.serve(async (req) => {
   const ytKey = Deno.env.get("YOUTUBE_API_KEY");
   const body = await req.json().catch(() => ({})) as { action?: string; force?: boolean; id?: string } & Record<string, unknown>;
   const aiKeys = { gemini: geminiKey ?? undefined, claude: claudeKey ?? undefined };
+
+  // Langkah internal: buat satu materi lalu lanjut ke materi berikutnya
+  if (body.action === "step") {
+    if (trigger !== "internal") return json({ error: "Tidak diizinkan" }, 403);
+    // @ts-ignore EdgeRuntime tersedia di Supabase Edge Runtime
+    EdgeRuntime.waitUntil(runStep(admin, body as unknown as StepJob, { geminiKey, claudeKey, ytKey, aiKeys }));
+    return json({ accepted: true }, 202);
+  }
 
   // Admin: cari gambar referensi Pinterest (latar belakang; hasil muncul otomatis via realtime)
   if (body.action === "pins") {
@@ -376,6 +456,8 @@ Deno.serve(async (req) => {
   if (trigger === "cron" && (geminiKey || claudeKey)) EdgeRuntime.waitUntil(backfillPins(admin, aiKeys, { limit: 3 }));
 
   // Cron: lewati bila batch terakhir < 40 jam
+  if (trigger === "internal") return json({ error: "Aksi tidak dikenal" }, 400);
+
   if (trigger === "cron") {
     const { data: last } = await admin.from("learning_materials").select("created_at")
       .neq("generated_by", "seed").order("created_at", { ascending: false }).limit(1);
@@ -393,6 +475,9 @@ Deno.serve(async (req) => {
     return json({ error: "API key AI belum diatur (GEMINI_API_KEY atau ANTHROPIC_API_KEY)." }, 400);
   }
 
+  // Proses yang tersangkut (> 10 menit) ditandai gagal agar tidak menghalangi
+  await admin.from("learning_generation_runs").update({ status: "error", message: "Terhenti (melewati batas waktu server)", finished_at: new Date().toISOString() })
+    .eq("status", "running").lt("started_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
   const { data: running } = await admin.from("learning_generation_runs").select("id")
     .eq("status", "running").gte("started_at", new Date(Date.now() - 5 * 60 * 1000).toISOString()).limit(1);
   if (running?.length) return json({ error: "Proses generate lain sedang berjalan. Tunggu beberapa menit." }, 409);
@@ -402,44 +487,8 @@ Deno.serve(async (req) => {
   const optLabel = [opts.apps.length ? opts.apps.join("/") : "semua aplikasi", opts.levels.length ? opts.levels.join("/") : "campuran level", `${opts.count} materi`, opts.topic ? `topik "${opts.topic}"` : ""].filter(Boolean).join(" · ");
   const { data: run } = await admin.from("learning_generation_runs").insert({ trigger, status: "running", message: optLabel }).select("id").single();
 
-  const work = async () => {
-    try {
-      const { data: recent } = await admin.from("learning_materials").select("title").order("created_at", { ascending: false }).limit(40);
-      const prompt = buildPrompt((recent ?? []).map((r) => r.title), plan, opts.topic);
-      const result = geminiKey ? await callGemini(geminiKey, prompt) : await callClaude(claudeKey!, prompt);
-      const items = validate(extractJsonArray(result.text), plan);
-      if (ytKey) {
-        for (const it of items) {
-          try {
-            it.videos = await searchYouTube(ytKey, it.youtube_query);
-            it.videos_checked_at = new Date().toISOString();
-          } catch { break; } // kuota habis → dilengkapi otomatis saat cron berikutnya
-        }
-      }
-      const batchDate = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-      const { data: inserted, error } = await admin.from("learning_materials").insert(items.map((it) => ({
-        ...it, videos_checked_at: it.videos_checked_at ?? null, batch_date: batchDate, sources: result.sources, generated_by: result.engine,
-      }))).select("id");
-      if (error) throw error;
-      await admin.from("learning_generation_runs").update({
-        status: "success", materials_created: items.length, message: `${result.engine} · ${optLabel}`, finished_at: new Date().toISOString(),
-      }).eq("id", run!.id);
-      // Gambar referensi Pinterest per materi (bila waktu habis, sisanya dilengkapi cron berikutnya)
-      for (const [i, row] of (inserted ?? []).entries()) {
-        if (i) await new Promise((ok) => setTimeout(ok, 6500));
-        try {
-          const pins = await findPins(aiKeys, items[i]);
-          await admin.from("learning_materials").update({ pins, pins_checked_at: new Date().toISOString() }).eq("id", row.id);
-        } catch { break; }
-      }
-    } catch (e) {
-      await admin.from("learning_generation_runs").update({
-        status: "error", message: String((e as Error).message ?? e).slice(0, 500), finished_at: new Date().toISOString(),
-      }).eq("id", run!.id);
-    }
-  };
-
+  // Materi dibuat satu per satu: tiap langkah = satu pemanggilan fungsi yang singkat (aman dari batas waktu server)
   // @ts-ignore EdgeRuntime tersedia di Supabase Edge Runtime
-  EdgeRuntime.waitUntil(work());
+  EdgeRuntime.waitUntil(kick({ run_id: run!.id, plan, topic: opts.topic, index: 0, label: optLabel }));
   return json({ started: true, run_id: run?.id }, 202);
 });
