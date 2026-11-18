@@ -200,7 +200,7 @@ Tulis HANYA daftar URL pin (format https://www.pinterest.com/pin/ANGKA/), satu p
 async function findPins(keys: { gemini?: string; claude?: string }, m: Parameters<typeof pinPrompt>[0]): Promise<Pin[]> {
   const ids: string[] = [];
   if (keys.gemini) {
-    const model = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+    const model = GEMINI_PRIMARY();
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${keys.gemini}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -271,19 +271,30 @@ async function geminiOnce(key: string, model: string, prompt: string, withSearch
   return { text, sources, engine: `gemini:${model}${withSearch ? "+search" : ""}` };
 }
 
-// Free tier: gemini-2.5-flash + Google Search (gratis s/d 500 req/hari). Cadangan: model Flash terbaru tanpa search.
+// Model Gemini: utama gemini-3.8-flash (+ Google Search), cadangan gemini-3.5-flash.
+// Bila server sibuk (503/429) dicoba ulang dengan jeda; bila model ditutup (404) langsung pindah ke berikutnya.
+// Abaikan nama model lama yang sudah ditutup Google (mis. gemini-2.5-*) bila masih tersimpan di secret
+const GEMINI_PRIMARY = () => { const m = Deno.env.get("GEMINI_MODEL"); return m && !/gemini-2\./.test(m) ? m : "gemini-3.8-flash"; };
+const GEMINI_FALLBACK = () => Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-3.5-flash";
+const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+const busy = (e: unknown) => / (429|500|503|504):/.test(String((e as Error)?.message ?? e));
+
 async function callGemini(key: string, prompt: string) {
-  const primary = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
-  const fallback = Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-3.5-flash";
-  try {
-    return await geminiOnce(key, primary, prompt, true);
-  } catch (e1) {
-    try {
-      return await geminiOnce(key, fallback, prompt, false);
-    } catch (e2) {
-      throw new Error(`${(e1 as Error).message} | cadangan: ${(e2 as Error).message}`.slice(0, 480));
+  const models = [...new Set([GEMINI_PRIMARY(), "gemini-3.8-flash", GEMINI_FALLBACK(), "gemini-3.5-flash"])];
+  const plan: [string, boolean][] = [...models.map((m) => [m, true] as [string, boolean]), ...models.map((m) => [m, false] as [string, boolean])];
+  const errors: string[] = [];
+  for (const [model, search] of plan) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await geminiOnce(key, model, prompt, search);
+      } catch (e) {
+        errors.push((e as Error).message.slice(0, 160));
+        if (!busy(e)) break; // model tidak tersedia / format ditolak → coba kombinasi berikutnya
+        await sleep(4000 * (attempt + 1));
+      }
     }
   }
+  throw new Error(errors.slice(-3).join(" | ").slice(0, 480));
 }
 
 async function callClaude(key: string, prompt: string) {
