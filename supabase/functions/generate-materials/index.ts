@@ -11,7 +11,7 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
-const APPS = ["Canva", "Figma", "Photoshop", "Illustrator", "After Effects", "CapCut", "PixelLab", "Alight Motion"];
+const APPS = ["Canva", "Figma", "Photoshop", "Illustrator", "Affinity", "After Effects", "CapCut", "PixelLab", "Alight Motion", "AI Image Prompt"];
 const LEVEL_NAMES = ["Easy", "Intermediate", "Advanced"] as const;
 type Level = (typeof LEVEL_NAMES)[number];
 const DEFAULT_LEVELS: Level[] = ["Easy", "Easy", "Intermediate", "Intermediate", "Advanced"];
@@ -74,6 +74,8 @@ Aturan isi tiap materi:
 - "challenge_task": satu tantangan desain konkret bertema story edukasi Islami/pengembangan diri, dengan kriteria selesai yang jelas.
 - "youtube_query": kata kunci pencarian YouTube (3-7 kata, boleh campur Indonesia/Inggris) yang PALING mungkin menemukan video tutorial bagus untuk materi ini. Wajib sebut nama aplikasinya, mis. "tutorial canva teks melengkung story instagram".
 - Konten sopan dan sesuai adab; hindari gambar makhluk bernyawa sebagai fokus utama bila memungkinkan.
+- Khusus aplikasi "Affinity": pakai Affinity versi terbaru (aplikasi gabungan vektor, piksel & layout dari Canva); sebut nama tool/panel yang nyata (mis. Pen Tool, Layers, Studio, Export Persona).
+- Khusus "AI Image Prompt": ajarkan cara menulis prompt gambar AI untuk aset story (latar, ilustrasi suasana, tekstur, mockup) di Gemini, ChatGPT, Canva Magic Media, Adobe Firefly, atau Midjourney. Wajib berisi: rumus prompt (subjek, gaya, komposisi, cahaya, warna, rasio 9:16), minimal 3 contoh prompt siap pakai dalam code block (bahasa Inggris + arti singkat), cara merevisi prompt, dan cara menggabungkan hasil AI ke desain story (ruang kosong untuk teks). Tekankan etika: hindari meniru gaya seniman tertentu atau karakter berhak cipta, utamakan pemandangan/objek/kaligrafi/abstrak daripada wajah, dan cek ulang detail yang keliru (teks Arab buatan AI sering salah — tulis teks secara manual).
 
 KELUARKAN HANYA JSON array (tanpa teks lain, tanpa code fence) dengan ${plan.length} objek berkunci persis:
 title, design_app, difficulty_level, summary, tutorial_markdown, pinterest_moodboard, challenge_task, youtube_query`;

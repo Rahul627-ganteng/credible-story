@@ -7,7 +7,7 @@ import { fmtDate, fmtDateTime } from "../lib/rundown";
 import { supabase } from "../lib/supabase";
 import type { GenerationRun, LearningMaterial, PinterestPin, YoutubeVideo } from "../lib/types";
 
-const GEN_APPS = ["Canva", "Figma", "Photoshop", "Illustrator", "After Effects", "CapCut", "PixelLab", "Alight Motion"];
+const GEN_APPS = ["Canva", "Figma", "Photoshop", "Illustrator", "Affinity", "After Effects", "CapCut", "PixelLab", "Alight Motion", "AI Image Prompt"];
 const GEN_LEVELS = ["Easy", "Intermediate", "Advanced"] as const;
 
 const levelCls: Record<string, string> = { Easy: "badge-green", Intermediate: "badge-amber", Advanced: "badge-red" };
@@ -261,7 +261,7 @@ export default function Learning() {
       <SectionTitle
         eyebrow="Khusus anggota"
         title="Learning Hub Desain"
-        desc="5 materi baru setiap 2 hari hasil riset AI dari web & Pinterest — lintas Canva, Figma, Photoshop, Illustrator, After Effects, CapCut, PixelLab, dan Alight Motion."
+        desc="5 materi baru setiap 2 hari hasil riset AI dari web & Pinterest — lintas Canva, Figma, Photoshop, Illustrator, Affinity, After Effects, CapCut, PixelLab, Alight Motion, hingga prompting gambar AI."
         action={isAdmin && (
           <div className="flex flex-wrap gap-2">
             <button className="btn-ghost" onClick={findVideos} disabled={vidBusy} title="Cari video YouTube untuk materi yang belum punya video">

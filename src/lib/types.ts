@@ -225,4 +225,4 @@ export interface ArchiveTopic { id: string; title: string; summary: string | nul
 
 export interface Credentials { id: string; username: string; password: string; name: string; phone_number?: string | null }
 
-export const DESIGN_APPS = ["Canva", "Figma", "Photoshop", "Illustrator", "After Effects", "CapCut", "PixelLab", "Alight Motion", "Lainnya"];
+export const DESIGN_APPS = ["Canva", "Figma", "Photoshop", "Illustrator", "After Effects", "CapCut", "PixelLab", "Alight Motion", "Affinity", "Lainnya"];
