@@ -81,13 +81,34 @@ KELUARKAN HANYA JSON array (tanpa teks lain, tanpa code fence) dengan ${plan.len
 title, design_app, difficulty_level, summary, tutorial_markdown, pinterest_moodboard, challenge_task, youtube_query`;
 }
 
+/** Perbaiki baris baru/tab mentah di dalam string JSON (sering muncul pada tutorial panjang) */
+function repairJson(raw: string): string {
+  let out = "", inStr = false, esc = false;
+  for (const ch of raw) {
+    if (inStr) {
+      if (esc) { esc = false; out += ch; continue; }
+      if (ch === "\\") { esc = true; out += ch; continue; }
+      if (ch === '"') inStr = false;
+      out += ch === "\n" ? "\\n" : ch === "\r" ? "" : ch === "\t" ? "\\t" : ch;
+    } else {
+      if (ch === '"') inStr = true;
+      out += ch;
+    }
+  }
+  return out.replace(/,\s*([\]}])/g, "$1");
+}
+const parseLoose = (raw: string) => { try { return JSON.parse(raw); } catch { return JSON.parse(repairJson(raw)); } };
+
 function extractJsonArray(text: string): unknown {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const raw = fenced ? fenced[1] : text;
-  const start = raw.indexOf("[");
-  const end = raw.lastIndexOf("]");
-  if (start < 0 || end <= start) throw new Error("Respons AI tidak berisi JSON array");
-  return JSON.parse(raw.slice(start, end + 1));
+  const candidates = [fenced?.[1], text].filter(Boolean) as string[];
+  for (const raw of candidates) {
+    const a = raw.indexOf("["), b = raw.lastIndexOf("]");
+    if (a >= 0 && b > a) { try { return parseLoose(raw.slice(a, b + 1)); } catch { /* coba bentuk lain */ } }
+    const c = raw.indexOf("{"), d = raw.lastIndexOf("}");
+    if (c >= 0 && d > c) { try { const o = parseLoose(raw.slice(c, d + 1)); return Array.isArray(o) ? o : Array.isArray(o?.materials) ? o.materials : [o]; } catch { /* lanjut */ } }
+  }
+  throw new Error("Respons AI tidak berisi JSON yang valid");
 }
 
 function validate(items: unknown, plan: Plan): Material[] {
@@ -260,7 +281,8 @@ async function geminiOnce(key: string, model: string, prompt: string, withSearch
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       ...(withSearch ? { tools: [{ google_search: {} }] } : {}),
       generationConfig: {
-        temperature: 0.8, maxOutputTokens: 8000,
+        temperature: 0.8, maxOutputTokens: 12000,
+        ...(withSearch ? {} : { responseMimeType: "application/json" }),
         ...(/^gemini-3/.test(model) ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
       },
     }),
@@ -286,7 +308,7 @@ const GEMINI_FALLBACK = () => Deno.env.get("GEMINI_FALLBACK_MODEL") ?? "gemini-3
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const busy = (e: unknown) => / (429|500|503|504):/.test(String((e as Error)?.message ?? e));
 
-async function callGemini(key: string, prompt: string, deadline = Date.now() + 115000) {
+async function callGemini<T>(key: string, prompt: string, deadline: number, check: (text: string) => T) {
   const models = [...new Set([GEMINI_PRIMARY(), "gemini-3.8-flash", GEMINI_FALLBACK(), "gemini-3.5-flash", "gemini-3.1-flash-lite"])];
   const plan: [string, boolean][] = [...models.map((m) => [m, true] as [string, boolean]), ...models.map((m) => [m, false] as [string, boolean])];
   const errors: string[] = [];
@@ -295,7 +317,14 @@ async function callGemini(key: string, prompt: string, deadline = Date.now() + 1
       const left = deadline - Date.now();
       if (left < 15000) throw new Error(`Waktu habis menunggu Gemini. ${errors.slice(-2).join(" | ")}`.slice(0, 480));
       try {
-        return await geminiOnce(key, model, prompt, search, Math.min(55000, left - 5000));
+        const r = await geminiOnce(key, model, prompt, search, Math.min(55000, left - 5000));
+        try {
+          return { ...r, parsed: check(r.text) };
+        } catch (pe) {
+          // jawaban bukan JSON yang rapi (mis. terpotong / berupa paragraf) → coba model/mode berikutnya
+          errors.push(`Gemini ${model}: ${(pe as Error).message}`.slice(0, 160));
+          break;
+        }
       } catch (e) {
         const msg = (e as Error).name === "TimeoutError" ? `Gemini ${model} timeout` : (e as Error).message;
         errors.push(msg.slice(0, 160));
@@ -358,8 +387,11 @@ async function runStep(admin: any, job: StepJob, k: Keys) {
     const { data: recent } = await admin.from("learning_materials").select("title").order("created_at", { ascending: false }).limit(40);
     const item = [job.plan[job.index]];
     const prompt = buildPrompt((recent ?? []).map((r: { title: string }) => r.title), item, job.topic);
-    const result = k.geminiKey ? await callGemini(k.geminiKey, prompt, started + 110000) : await callClaude(k.claudeKey!, prompt);
-    const [m] = validate(extractJsonArray(result.text), item);
+    const check = (text: string) => validate(extractJsonArray(text), item);
+    const result = k.geminiKey
+      ? await callGemini(k.geminiKey, prompt, started + 110000, check)
+      : await callClaude(k.claudeKey!, prompt).then((r) => ({ ...r, parsed: check(r.text) }));
+    const [m] = result.parsed;
     if (k.ytKey) {
       try { m.videos = await searchYouTube(k.ytKey, m.youtube_query); m.videos_checked_at = new Date().toISOString(); } catch { /* cron melengkapi */ }
     }
@@ -388,7 +420,7 @@ async function runStep(admin: any, job: StepJob, k: Keys) {
     const { data: run } = await admin.from("learning_generation_runs").select("materials_created,retries").eq("id", job.run_id).single();
     const done = run?.materials_created ?? 0;
     const msg = String((e as Error).message ?? e);
-    const transient = /Waktu habis|timeout| 429:| 500:| 503:| 504:/.test(msg);
+    const transient = /Waktu habis|timeout|JSON|materi valid| 429:| 500:| 503:| 504:/.test(msg);
     const retries = run?.retries ?? 0;
     if (transient && retries < 8) {
       const quota = / 429:/.test(msg) && !/ 503:/.test(msg);
