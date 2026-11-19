@@ -207,7 +207,7 @@ async function findPins(keys: { gemini?: string; claude?: string }, m: Parameter
       method: "POST",
       signal: AbortSignal.timeout(25000),
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: pinPrompt(m) }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.3, maxOutputTokens: 2000 } }),
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: pinPrompt(m) }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.3, maxOutputTokens: 2000, ...(/^gemini-3/.test(model) ? { thinkingConfig: { thinkingLevel: "low" } } : {}) } }),
     });
     if (!res.ok) throw new Error(`Gemini pins ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data = await res.json();
@@ -259,7 +259,10 @@ async function geminiOnce(key: string, model: string, prompt: string, withSearch
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       ...(withSearch ? { tools: [{ google_search: {} }] } : {}),
-      generationConfig: { temperature: 0.8, maxOutputTokens: 8000 },
+      generationConfig: {
+        temperature: 0.8, maxOutputTokens: 8000,
+        ...(/^gemini-3/.test(model) ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
+      },
     }),
   });
   if (!res.ok) throw new Error(`Gemini ${model} ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -284,7 +287,7 @@ const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const busy = (e: unknown) => / (429|500|503|504):/.test(String((e as Error)?.message ?? e));
 
 async function callGemini(key: string, prompt: string, deadline = Date.now() + 115000) {
-  const models = [...new Set([GEMINI_PRIMARY(), "gemini-3.8-flash", GEMINI_FALLBACK(), "gemini-3.5-flash"])];
+  const models = [...new Set([GEMINI_PRIMARY(), "gemini-3.8-flash", GEMINI_FALLBACK(), "gemini-3.5-flash", "gemini-3.1-flash-lite"])];
   const plan: [string, boolean][] = [...models.map((m) => [m, true] as [string, boolean]), ...models.map((m) => [m, false] as [string, boolean])];
   const errors: string[] = [];
   for (const [model, search] of plan) {
@@ -292,13 +295,13 @@ async function callGemini(key: string, prompt: string, deadline = Date.now() + 1
       const left = deadline - Date.now();
       if (left < 15000) throw new Error(`Waktu habis menunggu Gemini. ${errors.slice(-2).join(" | ")}`.slice(0, 480));
       try {
-        return await geminiOnce(key, model, prompt, search, Math.min(90000, left - 5000));
+        return await geminiOnce(key, model, prompt, search, Math.min(55000, left - 5000));
       } catch (e) {
         const msg = (e as Error).name === "TimeoutError" ? `Gemini ${model} timeout` : (e as Error).message;
         errors.push(msg.slice(0, 160));
-        if (!busy(e) && (e as Error).name !== "TimeoutError") break; // model tidak tersedia → kombinasi berikutnya
-        if ((e as Error).name === "TimeoutError") break;
-        await sleep(3000 * (attempt + 1));
+        // timeout / kuota habis / model tidak tersedia → langsung coba model berikutnya; sibuk sesaat → ulangi sekali
+        if ((e as Error).name === "TimeoutError" || / 429:/.test(msg) || !busy(e) || attempt >= 1) break;
+        await sleep(3000);
       }
     }
   }
@@ -382,8 +385,22 @@ async function runStep(admin: any, job: StepJob, k: Keys) {
       }).eq("id", job.run_id);
     }
   } catch (e) {
-    const { data: run } = await admin.from("learning_generation_runs").select("materials_created").eq("id", job.run_id).single();
+    const { data: run } = await admin.from("learning_generation_runs").select("materials_created,retries").eq("id", job.run_id).single();
     const done = run?.materials_created ?? 0;
+    const msg = String((e as Error).message ?? e);
+    const transient = /Waktu habis|timeout| 429:| 500:| 503:| 504:/.test(msg);
+    const retries = run?.retries ?? 0;
+    if (transient && retries < 8) {
+      const quota = / 429:/.test(msg) && !/ 503:/.test(msg);
+      const wait = quota ? 60 : 10; // menit
+      const at = new Date(Date.now() + wait * 60000);
+      const jam = at.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
+      await admin.from("learning_generation_runs").update({
+        status: "waiting", pending_step: job, retry_at: at.toISOString(), retries: retries + 1,
+        message: `${job.label} · ${done}/${total} selesai · Gemini ${quota ? "kena batas kuota" : "sedang sibuk"}, dilanjutkan otomatis ±${jam} WIB (percobaan ${retries + 1}/8)`,
+      }).eq("id", job.run_id);
+      return;
+    }
     await admin.from("learning_generation_runs").update({
       status: done > 0 ? "success" : "error",
       message: `${done > 0 ? `${done}/${total} materi berhasil, sisanya gagal: ` : ""}${String((e as Error).message ?? e)}`.slice(0, 500),
@@ -433,6 +450,19 @@ Deno.serve(async (req) => {
     return json({ accepted: true }, 202);
   }
 
+  // Cron: lanjutkan proses yang sempat tertunda karena Gemini sibuk / kuota
+  if (body.action === "resume") {
+    if (trigger === "manual") return json({ error: "Tidak diizinkan" }, 403);
+    const { data: due } = await admin.from("learning_generation_runs").select("id,pending_step")
+      .eq("status", "waiting").lte("retry_at", new Date().toISOString()).order("retry_at").limit(1);
+    const r = due?.[0];
+    if (!r?.pending_step) return json({ resumed: false });
+    await admin.from("learning_generation_runs").update({ status: "running", started_at: new Date().toISOString(), retry_at: null }).eq("id", r.id).eq("status", "waiting");
+    // @ts-ignore EdgeRuntime tersedia di Supabase Edge Runtime
+    EdgeRuntime.waitUntil(kick(r.pending_step as StepJob));
+    return json({ resumed: r.id });
+  }
+
   // Admin: cari gambar referensi Pinterest (latar belakang; hasil muncul otomatis via realtime)
   if (body.action === "pins") {
     if (!geminiKey && !claudeKey) return json({ error: "API key AI belum diatur (GEMINI_API_KEY atau ANTHROPIC_API_KEY)." }, 400);
@@ -475,9 +505,13 @@ Deno.serve(async (req) => {
     return json({ error: "API key AI belum diatur (GEMINI_API_KEY atau ANTHROPIC_API_KEY)." }, 400);
   }
 
-  // Proses yang tersangkut (> 10 menit) ditandai gagal agar tidak menghalangi
+  if (trigger === "manual") {
+    await admin.from("learning_generation_runs").update({ status: "error", message: "Dibatalkan — diganti proses generate baru", finished_at: new Date().toISOString(), pending_step: null })
+      .eq("status", "waiting");
+  }
+  // Proses yang tersangkut (> 20 menit tanpa kemajuan) ditandai gagal agar tidak menghalangi
   await admin.from("learning_generation_runs").update({ status: "error", message: "Terhenti (melewati batas waktu server)", finished_at: new Date().toISOString() })
-    .eq("status", "running").lt("started_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
+    .eq("status", "running").lt("started_at", new Date(Date.now() - 20 * 60 * 1000).toISOString());
   const { data: running } = await admin.from("learning_generation_runs").select("id")
     .eq("status", "running").gte("started_at", new Date(Date.now() - 5 * 60 * 1000).toISOString()).limit(1);
   if (running?.length) return json({ error: "Proses generate lain sedang berjalan. Tunggu beberapa menit." }, 409);

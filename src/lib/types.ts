@@ -197,7 +197,7 @@ export interface YoutubeVideo { id: string; title: string; channel: string; thum
 export interface GenerationRun {
   id: string;
   trigger: string;
-  status: "running" | "success" | "skipped" | "error";
+  status: "running" | "success" | "skipped" | "error" | "waiting";
   message: string | null;
   materials_created: number;
   started_at: string;

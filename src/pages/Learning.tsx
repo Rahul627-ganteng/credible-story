@@ -278,9 +278,9 @@ export default function Learning() {
       />
 
       {isAdmin && run && (
-        <div className={`rounded-xl border px-4 py-2.5 text-sm ${run.status === "error" ? "border-crimson-200 bg-crimson-50 text-crimson-800" : run.status === "running" ? "border-sky-200 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-ink-muted"}`}>
+        <div className={`rounded-xl border px-4 py-2.5 text-sm ${run.status === "error" ? "border-crimson-200 bg-crimson-50 text-crimson-800" : run.status === "waiting" ? "border-amber-200 bg-amber-50 text-amber-900" : run.status === "running" ? "border-sky-200 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-ink-muted"}`}>
           <b>Proses terakhir ({run.trigger === "cron" ? "otomatis 48 jam" : "manual"}, {fmtDateTime(run.started_at)}):</b>{" "}
-          {run.status === "running" ? `sedang berjalan… (${run.message ?? ""})` : run.status === "success" ? `berhasil, ${run.materials_created} materi (${run.message})` : run.status === "skipped" ? "dilewati — batch terakhir masih baru" : run.message}
+          {run.status === "waiting" ? `⏳ ${run.message ?? "menunggu dijadwalkan ulang"}` : run.status === "running" ? `sedang berjalan… (${run.message ?? ""})` : run.status === "success" ? `berhasil, ${run.materials_created} materi (${run.message})` : run.status === "skipped" ? "dilewati — batch terakhir masih baru" : run.message}
         </div>
       )}
 
