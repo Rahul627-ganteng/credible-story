@@ -100,13 +100,18 @@ function repairJson(raw: string): string {
 const parseLoose = (raw: string) => { try { return JSON.parse(raw); } catch { return JSON.parse(repairJson(raw)); } };
 
 function extractJsonArray(text: string): unknown {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const candidates = [fenced?.[1], text].filter(Boolean) as string[];
+  // Hati-hati: tutorial bisa berisi code block (mis. contoh prompt), jadi teks utuh dicoba lebih dulu
+  // dan hasil hanya diterima bila memang berisi objek materi.
+  const fenced = text.match(/^\s*```(?:json)?\s*([\s\S]*?)```\s*$/);
+  const candidates = [text, fenced?.[1]].filter(Boolean) as string[];
+  const looksRight = (v: unknown) => Array.isArray(v) && v.some((o) => o && typeof o === "object" && ("title" in o || "tutorial_markdown" in o));
   for (const raw of candidates) {
+    const tries: (() => unknown)[] = [];
     const a = raw.indexOf("["), b = raw.lastIndexOf("]");
-    if (a >= 0 && b > a) { try { return parseLoose(raw.slice(a, b + 1)); } catch { /* coba bentuk lain */ } }
+    if (a >= 0 && b > a) tries.push(() => parseLoose(raw.slice(a, b + 1)));
     const c = raw.indexOf("{"), d = raw.lastIndexOf("}");
-    if (c >= 0 && d > c) { try { const o = parseLoose(raw.slice(c, d + 1)); return Array.isArray(o) ? o : Array.isArray(o?.materials) ? o.materials : [o]; } catch { /* lanjut */ } }
+    if (c >= 0 && d > c) tries.push(() => { const o = parseLoose(raw.slice(c, d + 1)); return Array.isArray(o) ? o : Array.isArray(o?.materials) ? o.materials : [o]; });
+    for (const t of tries) { try { const v = t(); if (looksRight(v)) return v; } catch { /* coba bentuk lain */ } }
   }
   throw new Error("Respons AI tidak berisi JSON yang valid");
 }
@@ -115,8 +120,10 @@ function validate(items: unknown, plan: Plan): Material[] {
   if (!Array.isArray(items)) throw new Error("Format materi tidak valid");
   const out: Material[] = [];
   for (const it of items as Record<string, unknown>[]) {
-    const lvl = String(it.difficulty_level ?? "");
-    if (!it.title || !it.tutorial_markdown || !["Easy", "Intermediate", "Advanced"].includes(lvl)) continue;
+    // Tingkat & aplikasi ditetapkan dari rencana admin, jadi cukup cek judul & isi tutorial
+    if (!it || typeof it !== "object") continue;
+    const lvl = ["Easy", "Intermediate", "Advanced"].includes(String(it.difficulty_level)) ? String(it.difficulty_level) : (plan[out.length]?.level ?? "Easy");
+    if (!String(it.title ?? "").trim() || !String(it.tutorial_markdown ?? "").trim()) continue;
     const mood = Array.isArray(it.pinterest_moodboard) ? (it.pinterest_moodboard as Record<string, unknown>[]) : [];
     out.push({
       title: String(it.title).slice(0, 160),
